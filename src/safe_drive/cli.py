@@ -1,10 +1,11 @@
-"""Optional single-video runner; detector/tracker imports stay lazy."""
+"""Optional video-file and RTSP runner; detector/tracker imports stay lazy."""
 from __future__ import annotations
 
 import argparse
 from collections import defaultdict, deque
 import json
 from pathlib import Path
+import threading
 import time
 
 import numpy as np
@@ -18,8 +19,10 @@ from .speed import SpeedEstimator
 VEHICLE_CLASSES = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
 
 
-def run_video(video: Path, calibration: Path, model_path: str, out_video: Path,
-              events_path: Path, speed_limit: float, confidence: float) -> None:
+def run_video(video: Path | str, calibration: Path, model_path: str, out_video: Path,
+              events_path: Path, confidence: float,
+              stop_event: threading.Event | None = None, duration_s: int | None = None,
+              source_label: str | None = None, progress_callback=None) -> dict:
     try:
         import cv2
         from ultralytics import YOLO
@@ -31,10 +34,18 @@ def run_video(video: Path, calibration: Path, model_path: str, out_video: Path,
     plane = RoadPlane(cal["image_points_px"], cal["road_points_m"])
     detector = YOLO(model_path)
     tracker = DeepSort(max_age=30)
-    cap = cv2.VideoCapture(str(video))
+    source_text = str(video)
+    is_stream = source_text.lower().startswith(("rtsp://", "rtsps://"))
+    if is_stream and hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC") and hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
+        params = [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 8000, cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000]
+        cap = cv2.VideoCapture(source_text, cv2.CAP_FFMPEG, params)
+    else:
+        cap = cv2.VideoCapture(source_text if is_stream else str(video))
     if not cap.isOpened():
-        raise SystemExit(f"Cannot open video: {video}")
+        raise SystemExit("Could not open the video source. Check the file or camera connection settings.")
     fps = cap.get(cv2.CAP_PROP_FPS)
+    if is_stream and (not np.isfinite(fps) or fps <= 0):
+        fps = 15.0
     if not np.isfinite(fps) or fps <= 0:
         cap.release()
         raise SystemExit("Video has no valid frame rate; use a video with reliable timestamps")
@@ -49,12 +60,20 @@ def run_video(video: Path, calibration: Path, model_path: str, out_video: Path,
     locations = defaultdict(lambda: deque(maxlen=8))
     cooldown = defaultdict(lambda: -10**9)
     frame_index = 0
+    stream_started = time.monotonic()
+    stream_ended = False
+    event_source = source_label or ("live_camera" if is_stream else Path(video).name)
     try:
         while True:
+            if stop_event and stop_event.is_set():
+                break
+            if is_stream and duration_s and time.monotonic() - stream_started >= duration_s:
+                break
             ok, frame = cap.read()
             if not ok:
+                stream_ended = is_stream and not (stop_event and stop_event.is_set())
                 break
-            now = frame_index / fps
+            now = time.monotonic() - stream_started if is_stream else frame_index / fps
             detections = []
             result = detector(frame, verbose=False, conf=confidence)[0]
             for box in result.boxes:
@@ -100,7 +119,7 @@ def run_video(video: Path, calibration: Path, model_path: str, out_video: Path,
                         continue
                     cooldown[pair] = frame_index
                     eid = write_event(events_path, {
-                        "event_type": "approach_risk_screen", "video": video.name,
+                        "event_type": "approach_risk_screen", "source": event_source,
                         "camera_id": cal.get("camera_id", "unspecified"), "frame": frame_index,
                         "timestamp_s": round(now, 3), "encounter": enc,
                         "tracks": [first, second], "risk": score_event(None, False, None, True),
@@ -110,27 +129,32 @@ def run_video(video: Path, calibration: Path, model_path: str, out_video: Path,
                                 (20, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             out_video_writer.write(frame)
             frame_index += 1
+            if progress_callback and frame_index % 30 == 0:
+                progress_callback(frame_index, round(time.monotonic() - stream_started, 1))
     finally:
         cap.release()
         out_video_writer.release()
+    if frame_index == 0:
+        raise SystemExit("The source ended or stopped before delivering a usable frame.")
+    return {"frames_processed": frame_index, "source_ended": stream_ended,
+            "stopped": bool(stop_event and stop_event.is_set())}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Calibrated SAFE-Drive video research runner")
     sub = parser.add_subparsers(dest="command", required=True)
-    video = sub.add_parser("video", help="analyze one fixed-camera video")
-    video.add_argument("--input", required=True, type=Path)
+    video = sub.add_parser("video", help="analyze a fixed-camera video file or RTSP stream")
+    video.add_argument("--input", required=True, help="video file path or RTSP/RTSPS URL")
     video.add_argument("--calibration", required=True, type=Path)
     video.add_argument("--model", default="yolov8n.pt")
     video.add_argument("--output", type=Path, default=Path("outputs/annotated.mp4"))
     video.add_argument("--events", type=Path, default=Path("outputs/events.jsonl"))
-    video.add_argument("--speed-limit-kmh", type=float, default=50.0,
-                       help="reserved for configured advisory analyses; no automated enforcement")
     video.add_argument("--confidence", type=float, default=0.35)
+    video.add_argument("--duration-sec", type=int, help="maximum live stream duration; ignored for video files")
     args = parser.parse_args()
     if args.command == "video":
         run_video(args.input, args.calibration, args.model, args.output, args.events,
-                  args.speed_limit_kmh, args.confidence)
+                  args.confidence, duration_s=args.duration_sec)
 
 
 if __name__ == "__main__":

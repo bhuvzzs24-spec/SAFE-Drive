@@ -7,7 +7,7 @@
 
 ## Executive summary
 
-SAFE-Drive is a local traffic-video analysis prototype intended to support research into calibrated vehicle motion and near-miss screening. This iteration turns the original collection of scripts into a more reproducible toolkit and adds a local web dashboard for submitting a video with camera calibration, following job status, and reviewing annotated output and approach-risk events.
+SAFE-Drive is a local traffic-video analysis prototype intended to support research into calibrated vehicle motion and near-miss screening. This iteration turns the original collection of scripts into a more reproducible toolkit and adds a local web dashboard for submitting an offline video or connecting to an RTSP/RTSPS IP camera with camera calibration, following job status, and reviewing annotated output and approach-risk events.
 
 The current implementation is deliberately narrower than a full automated enforcement system. It detects general vehicle classes, associates detections across frames, maps vehicle contact points to a metric road plane, estimates motion, screens vehicle pairs for a close future approach, and records reviewable events. It does not include a trained helmet model, plate OCR, behavioral intervention, fine generation, or validated performance results.
 
@@ -19,7 +19,7 @@ Traffic video can support retrospective analysis of vehicle movement and conflic
 
 ### Processing path
 
-1. The operator selects a video, a site calibration JSON, and detector weights in the local dashboard.
+1. The operator selects an offline video or bounded RTSP/RTSPS camera session, plus site calibration and detector weights, in the local dashboard.
 2. A YOLO detector produces vehicle detections; DeepSORT associates detections into temporary clip-level tracks.
 3. The bottom-centre of each tracked box is projected into road-plane coordinates using a homography fitted from pixel/metre correspondences.
 4. A timestamp-aware estimator computes metric speed after a minimum observation baseline.
@@ -27,26 +27,26 @@ Traffic video can support retrospective analysis of vehicle movement and conflic
 6. Elevated and high screening events are annotated in the output clip and appended to JSONL with review metadata.
 7. The dashboard presents the annotated video and a readable event list.
 
-The dashboard stores uploads and outputs locally under `local_data/`; that path is git-ignored. The web server binds to loopback. Job status currently lives in memory and is lost when the process restarts.
+The dashboard stores uploaded clips, calibration files, and outputs locally under `local_data/`; that path is git-ignored. A live camera address is passed to the worker for the session and omitted from event records and error logs. The web server binds to loopback. Job status currently lives in memory and is lost when the process restarts.
 
 ### Repository components
 
 | Component | Purpose |
 | --- | --- |
-| `app.py`, `templates/`, `static/` | Local upload, job status, annotated video, and event review interface |
+| `app.py`, `templates/`, `static/` | Offline video and RTSP camera analysis, job status, annotated video, and event review interface |
 | `src/safe_drive/geometry.py` | Pixel-to-road-plane homography and contact-point projection |
 | `src/safe_drive/speed.py` | Timestamp-aware metric motion estimate and warm-up status |
 | `src/safe_drive/encounters.py` | Pairwise closest approach, closing speed, TTC, and screening level |
 | `src/safe_drive/risk.py` | Transparent advisory score with explicit missing-signal fields |
 | `src/safe_drive/events.py` | Append-only JSONL event writer and content-addressed event ID |
-| `src/safe_drive/cli.py` | Optional single-video detector/tracker processing path |
+| `src/safe_drive/cli.py` | Optional video-file and RTSP detector/tracker processing path |
 | `config/calibration.example.json` | Example calibration file structure; values are placeholders only |
 | `docs/RESEARCH_PLAN.md` | Proposed research question, split plan, baselines, and metrics |
 | `legacy/` | Unmodified starter scripts retained for comparison, with known limitations documented |
 
 ## User interface
 
-The interface is a dark, responsive research console with four visible pipeline stages, video and calibration upload, detector-weight selection, queued/running/completed/failed status, annotated-video playback, and a pairwise event list. It emphasizes local processing and human review. The dashboard is a local research tool, not a multi-user hosted product; it has no account system, durable job database, or production deployment setup.
+The interface is a dark, responsive research console with offline-video and live-camera modes, calibration and detector selection, queued/running/completed/failed status, stop control, live event updates, annotated-video playback, and a pairwise event list. It emphasizes local processing and human review. The dashboard is a local research tool, not a multi-user hosted product; it has no account system, durable job database, ONVIF discovery, or production deployment setup.
 
 ## Research direction
 
@@ -63,6 +63,8 @@ The contribution should be judged against a current literature review rather tha
 - The currently used risk thresholds are illustrative and are not probabilities, legal standards, or fines.
 - There is no supplied dataset, trained helmet detector, human-subject outcome study, benchmark table, or model card.
 - Dashboard job state is memory-only; interrupted jobs must be resubmitted.
+- Live-camera support requires a reachable RTSP/RTSPS endpoint and compatible local OpenCV transport/codec support; camera discovery and automatic reconnect are not implemented.
+- Frames are processed sequentially, with no guaranteed real-time throughput or annotated live preview; the recording is available after the session ends or is stopped.
 - No accuracy, safety benefit, novelty, or publication acceptance claim is established.
 
 ## Responsible use
@@ -80,4 +82,4 @@ Use only footage with appropriate permission. Keep source footage and generated 
 
 ## Reproducibility and execution
 
-Install with `python -m pip install -e '.[vision,web]'`, create a site-specific calibration file, then launch `python app.py` and open `http://127.0.0.1:5170`. The pretrained detector weights may be downloaded on first use; record the precise weight file, its hash, library versions, calibration file, and full run settings for every experiment. This update adds the dashboard and report, but does not claim benchmark validation.
+Install with `python -m pip install -e '.[vision,web]'`, create a site-specific calibration file, then launch `python app.py` and open `http://127.0.0.1:5170`. The pretrained detector weights may be downloaded on first use; record the precise weight file, its hash, library versions, calibration file, and full run settings for every experiment. This update adds RTSP/RTSPS camera sessions, a dashboard, and a report, but does not claim benchmark validation. Live camera mode connects to a stream; it does not install the application into camera firmware.

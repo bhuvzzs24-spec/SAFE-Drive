@@ -33,20 +33,32 @@
 
       <section class="workspace-grid">
         <div class="panel upload-panel">
-          <div class="panel-head"><div><div class="panel-kicker">01 / INPUT</div><h2>New analysis</h2></div><span class="step-badge">VIDEO + CALIBRATION</span></div>
+          <div class="panel-head"><div><div class="panel-kicker">01 / INPUT</div><h2>New analysis</h2></div><span class="step-badge">CLIP OR LIVE CAMERA</span></div>
           <form id="analysis-form">
-            <label class="field-label" for="video-file">Traffic video <span>MP4 · MOV · MKV · AVI · WEBM</span></label>
-            <label class="dropzone" id="dropzone" for="video-file">
-              <input id="video-file" name="video" type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/x-msvideo,video/webm,.mp4,.mov,.mkv,.avi,.webm" required>
-              <span class="upload-glyph">↑</span><strong>Choose a video to analyze</strong><small>or drop a file here · max 300 MB</small><span class="file-name" id="video-name">No video selected</span>
-            </label>
+            <div class="mode-switch" role="tablist" aria-label="Analysis source">
+              <button class="mode-option selected" type="button" data-mode="file" role="tab" aria-selected="true">Video file</button>
+              <button class="mode-option" type="button" data-mode="camera" role="tab" aria-selected="false">Live IP camera</button>
+            </div>
+            <div id="file-source">
+              <label class="field-label" for="video-file">Traffic video <span>MP4 · MOV · MKV · AVI · WEBM</span></label>
+              <label class="dropzone" id="dropzone" for="video-file">
+                <input id="video-file" name="video" type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/x-msvideo,video/webm,.mp4,.mov,.mkv,.avi,.webm" required>
+                <span class="upload-glyph">↑</span><strong>Choose a video to analyze</strong><small>or drop a file here · max 300 MB</small><span class="file-name" id="video-name">No video selected</span>
+              </label>
+            </div>
+            <div id="camera-source" hidden>
+              <label class="field-label" for="stream-url">Camera stream address <span>RTSP / RTSPS</span></label>
+              <input class="text-input camera-input" id="stream-url" name="stream_url" type="password" placeholder="rtsp://camera-address:554/stream" maxlength="2048" autocomplete="off" spellcheck="false" disabled>
+              <div class="camera-help">Enter this camera’s RTSP stream URL. The address is used for the session and is not written to the event log.</div>
+              <div class="duration-row"><label class="field-label" for="duration">Capture duration</label><select class="text-input" id="duration" name="duration_s" disabled><option value="60">1 minute</option><option value="300" selected>5 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">60 minutes</option></select></div>
+            </div>
             <div class="field-row">
               <div class="field-block"><label class="field-label" for="calibration-file">Camera calibration <span>JSON</span></label><label class="file-picker"><span class="file-icon">⌗</span><span id="calibration-name">Select site calibration…</span><input id="calibration-file" name="calibration" type="file" accept=".json,application/json" required></label></div>
               <div class="field-block"><label class="field-label" for="model">Detector weights <span>LOCAL PATH</span></label><input class="text-input" id="model" name="model" value="{{ model }}" maxlength="240" autocomplete="off"></div>
             </div>
             <div class="calibration-note"><span>i</span><div><b>Calibration is required for metric speed.</b> Use measured road-plane correspondences for this fixed camera. The example file is not a valid site calibration.</div></div>
             <button class="primary-button" id="run-button" type="submit"><span class="button-icon">▷</span><span>Run video analysis</span><span class="button-arrow">↗</span></button>
-            <div class="form-foot"><span class="lock-icon">◇</span> Processed locally · no cloud upload</div>
+            <div class="form-foot"><span class="lock-icon">◇</span> Processed on this computer · stream URL is not logged</div>
             <div class="inline-error" id="form-error" role="alert"></div>
           </form>
         </div>
@@ -67,7 +79,7 @@
       </section>
 
       <section class="panel results-panel" id="results" hidden>
-        <div class="panel-head"><div><div class="panel-kicker">03 / OUTPUT</div><h2>Analysis review</h2></div><span class="job-pill" id="job-status">QUEUED</span></div>
+        <div class="panel-head"><div><div class="panel-kicker">03 / OUTPUT</div><h2>Analysis review</h2></div><div class="job-actions"><button class="stop-button" id="stop-button" type="button" hidden>Stop live analysis</button><span class="job-pill" id="job-status">QUEUED</span></div></div>
         <div class="job-summary" id="job-summary">Waiting for analysis…</div>
         <div class="results-grid" id="results-content" hidden>
           <div class="video-wrap"><div class="result-subhead"><strong>ANNOTATED VIDEO</strong><span>LOCAL RESULT</span></div><video id="result-video" controls playsinline></video></div>

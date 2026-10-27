@@ -6,6 +6,23 @@ const dropzone = document.getElementById('dropzone');
 const button = document.getElementById('run-button');
 const errorBox = document.getElementById('form-error');
 let pollTimer = null;
+let activeMode = 'file';
+let activeJobId = null;
+
+document.querySelectorAll('.mode-option').forEach(option => option.addEventListener('click', () => {
+  activeMode = option.dataset.mode;
+  document.querySelectorAll('.mode-option').forEach(item => {
+    const selected = item === option;
+    item.classList.toggle('selected', selected);
+    item.setAttribute('aria-selected', String(selected));
+  });
+  document.getElementById('file-source').hidden = activeMode !== 'file';
+  document.getElementById('camera-source').hidden = activeMode !== 'camera';
+  videoInput.disabled = activeMode !== 'file';
+  document.getElementById('stream-url').disabled = activeMode !== 'camera';
+  document.getElementById('duration').disabled = activeMode !== 'camera';
+  document.getElementById('run-button').querySelector('span:nth-child(2)').textContent = activeMode === 'camera' ? 'Connect to live camera' : 'Run video analysis';
+}));
 
 videoInput.addEventListener('change', () => {
   document.getElementById('video-name').textContent = videoInput.files[0]?.name || 'No video selected';
@@ -29,10 +46,12 @@ form.addEventListener('submit', async event => {
   button.querySelector('span:nth-child(2)').textContent = 'Uploading video…';
   const data = new FormData(form);
   try {
-    const response = await fetch('/api/jobs', {method: 'POST', headers: {'X-CSRF-Token': csrf}, body: data});
+    const endpoint = activeMode === 'camera' ? '/api/camera-jobs' : '/api/jobs';
+    button.querySelector('span:nth-child(2)').textContent = activeMode === 'camera' ? 'Connecting to camera…' : 'Uploading video…';
+    const response = await fetch(endpoint, {method: 'POST', headers: {'X-CSRF-Token': csrf}, body: data});
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Could not start analysis.');
-    showJob(result.id);
+    showJob(result.id, activeMode === 'camera');
   } catch (error) {
     errorBox.textContent = error.message;
     button.disabled = false;
@@ -40,12 +59,16 @@ form.addEventListener('submit', async event => {
   }
 });
 
-function showJob(id) {
+function showJob(id, isLive) {
+  activeJobId = id;
   const panel = document.getElementById('results');
   panel.hidden = false;
   panel.scrollIntoView({behavior: 'smooth', block: 'start'});
   document.getElementById('job-summary').textContent = `Job ${id.slice(0, 8)} · detector ${document.getElementById('model').value}`;
   document.getElementById('job-status').textContent = 'QUEUED';
+  document.getElementById('stop-button').hidden = !isLive;
+  document.getElementById('stop-button').disabled = false;
+  document.getElementById('stop-button').textContent = 'Stop live analysis';
   if (pollTimer) clearInterval(pollTimer);
   pollJob(id);
   pollTimer = setInterval(() => pollJob(id), 1800);
@@ -57,8 +80,14 @@ async function pollJob(id) {
     const job = await response.json();
     const status = document.getElementById('job-status');
     status.textContent = job.status.toUpperCase();
-    if (job.status === 'queued' || job.status === 'running') {
-      document.getElementById('job-summary').textContent = job.status === 'queued' ? 'Queued locally. The analysis worker will start shortly…' : 'Running detection, tracking, calibration and approach-risk screening…';
+    if (job.status === 'queued' || job.status === 'running' || job.status === 'stopping') {
+      document.getElementById('job-summary').textContent = job.status === 'queued' ? 'Queued locally. The analysis worker will start shortly…' : job.status === 'stopping' ? 'Stopping the camera stream…' : job.live ? `Live analysis active · ${job.frames_processed || 0} frames processed · event review updates as alerts appear` : 'Running detection, tracking, calibration and approach-risk screening…';
+      if (job.status === 'stopping') document.getElementById('stop-button').disabled = true;
+      if (job.status === 'running' && job.live) {
+        document.getElementById('results-content').hidden = false;
+        document.querySelector('.video-wrap').hidden = true;
+        fetch(`/api/jobs/${id}/events`).then(response => response.json()).then(data => renderEvents(data.events || [])).catch(() => {});
+      }
       return;
     }
     clearInterval(pollTimer);
@@ -71,8 +100,14 @@ async function pollJob(id) {
       error.textContent = job.error || 'See the local terminal for details.';
       return;
     }
-    document.getElementById('job-summary').textContent = `Completed · ${job.name} · all events require manual review`;
+    if (job.status === 'cancelled') {
+      document.getElementById('job-summary').textContent = 'Live analysis was stopped before it started.';
+      return;
+    }
+    document.getElementById('stop-button').hidden = true;
+    document.getElementById('job-summary').textContent = `Completed · ${job.name} · ${job.frames_processed || 0} frames${job.warning ? ` · ${job.warning}` : ''} · manual review required`;
     document.getElementById('results-content').hidden = false;
+    document.querySelector('.video-wrap').hidden = false;
     document.getElementById('job-error').hidden = true;
     const player = document.getElementById('result-video');
     player.src = `/api/jobs/${id}/video`;
@@ -117,3 +152,16 @@ function renderEvents(events) {
     list.append(card);
   });
 }
+
+document.getElementById('stop-button').addEventListener('click', async () => {
+  if (!activeJobId) return;
+  const stopButton = document.getElementById('stop-button');
+  stopButton.disabled = true;
+  stopButton.textContent = 'Stopping…';
+  try {
+    await fetch(`/api/jobs/${activeJobId}/stop`, {method: 'POST', headers: {'X-CSRF-Token': csrf}});
+  } catch (_error) {
+    stopButton.disabled = false;
+    stopButton.textContent = 'Stop live analysis';
+  }
+});

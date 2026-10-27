@@ -9,7 +9,7 @@ SAFE-Drive is a research prototype for analyzing traffic video using calibrated 
 - Pairwise 2-D closest-approach/TTC screening using each track's positions and velocities.
 - Configurable, explainable risk scoring with missing-signal reporting.
 - Append-only JSONL event logging with content-addressed event identifiers.
-- Local review dashboard for video upload, asynchronous processing, annotated playback, and event review.
+- Local review dashboard for offline video and live camera analysis, annotated playback, and event review.
 - Optional computer-vision and OCR dependencies, so analysis modules can be used without downloading model weights.
 
 The starter code in `detector.py`, `main.py`, `near_miss.py`, `plate_reader.py`, `risk_engine.py`, and `speed_estimator.py` records the original prototype for comparison. `src/safe_drive/` contains the research modules. The original hard-coded pixel scale, horizontal-only TTC, plate-based automatic fine logic, and global near-miss attribution should not be used as scientific measurements.
@@ -37,7 +37,7 @@ safe-drive video \
   --events outputs/events.jsonl
 ```
 
-The runner writes annotated video and pairwise approach-risk screening events. It does not read plates, infer helmet status, or issue fines. Track IDs are temporary within one clip. Review every event and validate calibration before interpreting the reported km/h values.
+The runner writes annotated video and pairwise approach-risk screening events. Its input can be a local file or an RTSP/RTSPS URL; add `--duration-sec 300` to bound a live session. It does not read plates, infer helmet status, or issue fines. Track IDs are temporary within one clip. Review every event and validate calibration before interpreting the reported km/h values.
 
 ## Local review dashboard
 
@@ -47,7 +47,9 @@ Install the `vision` and `web` extras, then run:
 python app.py
 ```
 
-Open `http://127.0.0.1:5170`. Upload a traffic video and a site-specific calibration JSON, then review the annotated clip and event list. Jobs run one at a time in a local background worker. Job status is held in memory and resets when the server restarts; source videos and results are stored under ignored `local_data/`. The server binds to loopback and is intended for local research use only. Do not expose it to a network.
+Open `http://127.0.0.1:5170`. Choose **Video file** to upload a clip, or **Live IP camera** to enter an RTSP/RTSPS stream address and select a bounded capture duration. Both modes require a site-specific calibration JSON. For live sessions, the event list updates as alerts appear; the annotated recording is available when the session ends or is stopped. Jobs run one at a time in a local background worker. Job status is held in memory and resets when the server restarts; uploaded clips and results are stored under ignored `local_data/`. Camera stream addresses are passed to the worker for the session and omitted from event records and error logs. The server binds to loopback and is intended for local research use only. Do not expose it to a network.
+
+Live mode connects to the camera; it does not install software into camera firmware. The camera must expose an RTSP/RTSPS stream reachable from this computer, and OpenCV must support its transport and codec. This version has no ONVIF discovery or automatic reconnection and cannot guarantee real-time throughput on every computer. Some consumer cameras do not provide RTSP; check the camera or NVR settings.
 
 ## Calibration comes before speed claims
 
@@ -63,7 +65,7 @@ No accuracy, safety, or publication claim is made by this repository. Results re
 
 - Treat all detections and risk scores as research signals requiring human review.
 - Do not use OCR output, track IDs, or risk scores to make an adverse decision about a person.
-- Keep raw footage local, minimize retention, redact faces/plates in shared examples, and document permissions and applicable institutional review requirements.
+- Keep raw footage and camera credentials local, minimize retention, redact faces/plates in shared examples, and document permissions and applicable institutional review requirements.
 - The scoring weights are illustrative policy parameters, not calibrated probabilities, legal rules, or validated fines.
 
 ## Suggested evaluation plan

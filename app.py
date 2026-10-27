@@ -68,20 +68,40 @@ def create_app() -> Flask:
             abort(404)
         return job
 
-    def analyze(job_id: str, video_path: Path, calibration_path: Path, model: str) -> None:
+    def analyze(job_id: str, source: Path | str, calibration_path: Path, model: str,
+                stop_event: threading.Event, duration_s: int | None, source_label: str) -> None:
         with JOBS_LOCK:
-            JOBS[job_id]["status"] = "running"
+            if stop_event.is_set():
+                JOBS[job_id]["status"] = "cancelled"
+                return
+            JOBS[job_id].update(status="running", output=str(DATA / job_id / "annotated.mp4"),
+                                events=str(DATA / job_id / "events.jsonl"))
         folder = DATA / job_id
         output_video = folder / "annotated.mp4"
         events_path = folder / "events.jsonl"
         try:
-            run_video(video_path, calibration_path, model, output_video, events_path, 50.0, 0.35)
+            result = run_video(source, calibration_path, model, output_video, events_path,
+                               0.35, stop_event, duration_s, source_label,
+                               lambda frames, elapsed: update_progress(job_id, frames, elapsed))
             with JOBS_LOCK:
-                JOBS[job_id].update(status="completed", output=str(output_video), events=str(events_path))
+                warning = "Camera stream ended before the requested duration." if result["source_ended"] else None
+                JOBS[job_id].update(status="completed", output=str(output_video), events=str(events_path),
+                                    frames_processed=result["frames_processed"], warning=warning)
         except (Exception, SystemExit) as exc:  # includes clear errors from missing optional modules
-            app.logger.exception("Analysis job %s failed", job_id)
+            if isinstance(source, str) and source.lower().startswith(("rtsp://", "rtsps://")):
+                # Avoid writing camera credentials embedded in a URL to logs or the UI.
+                app.logger.warning("Live camera analysis failed for job %s; details redacted", job_id)
+                message = "Camera analysis failed. Check the RTSP address, network, credentials, and stream codec."
+            else:
+                app.logger.exception("Analysis job %s failed", job_id)
+                message = f"{type(exc).__name__}: {exc}"
             with JOBS_LOCK:
-                JOBS[job_id].update(status="failed", error=f"{type(exc).__name__}: {exc}")
+                JOBS[job_id].update(status="failed", error=message)
+
+    def update_progress(job_id: str, frames: int, elapsed: float) -> None:
+        with JOBS_LOCK:
+            if job_id in JOBS:
+                JOBS[job_id].update(frames_processed=frames, elapsed_s=elapsed)
 
     @app.post("/api/jobs")
     def create_job():
@@ -108,9 +128,47 @@ def create_app() -> Flask:
         calibration_path = folder / "calibration.json"
         upload.save(video_path)
         calibration_path.write_text(json.dumps(calibration, indent=2), encoding="utf-8")
+        stop_event = threading.Event()
         with JOBS_LOCK:
-            JOBS[job_id] = {"id": job_id, "name": safe_name, "status": "queued", "model": model}
-        WORKERS.submit(analyze, job_id, video_path, calibration_path, model)
+            JOBS[job_id] = {"id": job_id, "name": safe_name, "status": "queued", "model": model,
+                            "stop_event": stop_event}
+        WORKERS.submit(analyze, job_id, video_path, calibration_path, model, stop_event, None, safe_name)
+        return jsonify(id=job_id, status="queued"), 202
+
+    @app.post("/api/camera-jobs")
+    def create_camera_job():
+        stream_url = request.form.get("stream_url", "").strip()
+        if not stream_url.lower().startswith(("rtsp://", "rtsps://")) or len(stream_url) > 2048:
+            return jsonify(error="Enter a valid RTSP or RTSPS camera stream address."), 400
+        calibration_upload = request.files.get("calibration")
+        if not calibration_upload or not calibration_upload.filename:
+            return jsonify(error="Choose the calibration JSON for this camera."), 400
+        try:
+            calibration = json.load(calibration_upload.stream)
+            RoadPlane(calibration["image_points_px"], calibration["road_points_m"])
+        except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+            return jsonify(error=f"Calibration JSON is invalid: {exc}"), 400
+        try:
+            duration_s = int(request.form.get("duration_s", "300"))
+        except ValueError:
+            return jsonify(error="Duration must be a whole number of seconds."), 400
+        if not 10 <= duration_s <= 3600:
+            return jsonify(error="Choose a live analysis duration between 10 and 3600 seconds."), 400
+        model = request.form.get("model", "yolov8n.pt").strip()
+        if not model or len(model) > 240:
+            return jsonify(error="Enter a valid model filename or local model path."), 400
+        job_id = uuid.uuid4().hex
+        folder = DATA / job_id
+        folder.mkdir(parents=True, exist_ok=False)
+        calibration_path = folder / "calibration.json"
+        calibration_path.write_text(json.dumps(calibration, indent=2), encoding="utf-8")
+        stop_event = threading.Event()
+        camera_label = str(calibration.get("camera_id", "camera"))[:80]
+        with JOBS_LOCK:
+            JOBS[job_id] = {"id": job_id, "name": camera_label, "status": "queued", "model": model,
+                            "stop_event": stop_event, "live": True}
+        WORKERS.submit(analyze, job_id, stream_url, calibration_path, model,
+                       stop_event, duration_s, camera_label)
         return jsonify(id=job_id, status="queued"), 202
 
     @app.get("/api/jobs/<job_id>")
@@ -118,7 +176,18 @@ def create_app() -> Flask:
         job = dict(job_or_404(job_id))
         job.pop("output", None)
         job.pop("events", None)
+        job.pop("stop_event", None)
         return jsonify(job)
+
+    @app.post("/api/jobs/<job_id>/stop")
+    def stop_job(job_id: str):
+        job = job_or_404(job_id)
+        with JOBS_LOCK:
+            if job["status"] not in {"queued", "running"}:
+                return jsonify(status=job["status"]), 409
+            job["status"] = "stopping"
+            job["stop_event"].set()
+        return jsonify(status="stopping"), 202
 
     @app.get("/api/jobs/<job_id>/video")
     def get_video(job_id: str):
@@ -132,7 +201,7 @@ def create_app() -> Flask:
         job = job_or_404(job_id)
         if job["status"] == "failed":
             return jsonify(events=[], error=job.get("error")), 200
-        if job["status"] != "completed":
+        if job["status"] not in {"running", "stopping", "completed"} or "events" not in job:
             return jsonify(events=[]), 200
         events_file = Path(job["events"])
         events = []
