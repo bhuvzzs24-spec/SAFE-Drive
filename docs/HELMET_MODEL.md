@@ -2,7 +2,7 @@
 
 ## Current status
 
-The repository does not include a helmet detector, annotated helmet dataset, or measured helmet performance. The application therefore does not output helmet compliance decisions. The scripts here establish a reproducible training and validation entry point; they do not create a trained model from absent data or enable helmet enforcement. The proposed four classes are experimental visual states, not legal conclusions.
+The repository does not include trained helmet weights, an annotated helmet dataset, or measured helmet performance. An optional inference adapter is available, but it activates only when an existing local model is explicitly provided. It does not create a trained model from absent data or enable helmet enforcement. The four classes are experimental visual states, not legal conclusions.
 
 ## Dataset and annotation
 
@@ -44,6 +44,15 @@ python scripts/validate_helmet_model.py --model training-runs/helmet/helmet-stat
 
 The training script checks class order and prints the produced weights path. Validation requires a held-out YAML with `test` split and reports class-wise precision, recall, AP50 and AP50-95; Ultralytics writes plots and a confusion matrix. Preserve logs, model hash, dataset version, package versions, split definition and test settings. Report confidence intervals and subgroup results for distance, occlusion, lighting, helmet color/style and camera site. Check the base model and dataset licenses before redistribution.
 
-## Association and policy boundary
+## Optional inference and association boundary
 
-A helmet/head detector alone does not establish which motorcycle or rider it belongs to. This repository does not yet associate helmet boxes to rider identities or motorcycle tracks, temporally confirm helmet states, or emit helmet events. Those steps require rider-instance/pose association and a separately evaluated temporal policy. Never infer compliance from the nearest motorcycle, treat uncertain as compliant, or use predictions as legally verified violations. Any future integration must retain an explicit uncertain state and require human review.
+A helmet/head detector alone does not establish which motorcycle or rider it belongs to. The optional adapter maps a detected head-region box to a tracked pedestrian only when its center falls in that person's upper 45% and the match is unique; ambiguous matches are `uncertain`, and no match produces no classification. This is a simple geometric association, not pose estimation, and has not been validated on crowded or occluded footage. There is no temporal confirmation or helmet event generation. Never infer compliance from the nearest motorcycle, treat `uncertain` or missing detections as compliant, or use predictions as legally verified violations.
+
+To enable experimental frame-level inference, export the local weights path before starting the dashboard or CLI:
+
+```bash
+export SAFE_DRIVE_HELMET_MODEL=/absolute/path/to/best.pt
+python app.py
+```
+
+The file must exist locally and expose the exact four class names and order above. The runner does not download helmet weights. Track summaries and annotated frames may include a helmet class only while this model is enabled; downstream review remains necessary. Until suitable model weights, test footage, and independent labels are supplied, no helmet inference result or performance claim is available.

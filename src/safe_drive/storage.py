@@ -99,6 +99,23 @@ class SQLiteStore:
                     PRIMARY KEY(session_id, track_id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_tracks_session_class ON vehicle_tracks(session_id, vehicle_class);
+                CREATE TABLE IF NOT EXISTS tracked_objects (
+                    session_id TEXT NOT NULL REFERENCES analysis_sessions(session_id) ON DELETE CASCADE,
+                    track_id TEXT NOT NULL,
+                    object_class TEXT NOT NULL,
+                    first_seen_s REAL NOT NULL,
+                    last_seen_s REAL NOT NULL,
+                    bbox_json TEXT NOT NULL,
+                    trajectory_json TEXT NOT NULL,
+                    confidence REAL,
+                    speed_kmh REAL,
+                    speed_quality TEXT NOT NULL,
+                    helmet_class TEXT,
+                    observations INTEGER NOT NULL,
+                    active INTEGER NOT NULL CHECK(active IN (0, 1)),
+                    PRIMARY KEY(session_id, track_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_objects_session_class ON tracked_objects(session_id, object_class);
                 CREATE TABLE IF NOT EXISTS violation_events (
                     event_id TEXT PRIMARY KEY,
                     session_id TEXT NOT NULL REFERENCES analysis_sessions(session_id) ON DELETE CASCADE,
@@ -121,6 +138,17 @@ class SQLiteStore:
                 CREATE INDEX IF NOT EXISTS idx_events_session_time ON violation_events(session_id, timestamp_s);
                 CREATE INDEX IF NOT EXISTS idx_events_review ON violation_events(review_status, timestamp_s);
             """)
+            # Upgrade existing databases: retain every previous vehicle row in the
+            # generalized track history while leaving the compatibility table intact.
+            conn.execute("""INSERT OR IGNORE INTO tracked_objects
+                (session_id,track_id,object_class,first_seen_s,last_seen_s,bbox_json,
+                 trajectory_json,confidence,speed_kmh,speed_quality,observations,active)
+                SELECT session_id,track_id,vehicle_class,first_seen_s,last_seen_s,bbox_json,
+                 trajectory_json,confidence,speed_kmh,speed_quality,observations,active
+                FROM vehicle_tracks""")
+            object_columns = {row[1] for row in conn.execute("PRAGMA table_info(tracked_objects)")}
+            if "helmet_class" not in object_columns:
+                conn.execute("ALTER TABLE tracked_objects ADD COLUMN helmet_class TEXT")
             conn.execute("PRAGMA user_version = 1")
 
     @staticmethod
@@ -159,6 +187,25 @@ class SQLiteStore:
     def save_tracks(self, session_id: str, tracks: dict) -> None:
         with self._connect() as conn:
             for track in tracks.get("tracks", []):
+                object_class = str(track.get("object_class", track.get("vehicle_class", "unknown")))
+                values = (session_id, track["track_id"], object_class, track["first_seen_s"],
+                          track["last_seen_s"], json.dumps(track["bbox_xyxy"]),
+                          json.dumps(track["trajectory"]), track.get("confidence"),
+                          track.get("speed_kmh"), track["speed_quality"], track.get("helmet_class"),
+                          track["observations"], int(track["active"]))
+                conn.execute("""INSERT INTO tracked_objects
+                    (session_id,track_id,object_class,first_seen_s,last_seen_s,bbox_json,
+                     trajectory_json,confidence,speed_kmh,speed_quality,helmet_class,observations,active)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(session_id,track_id) DO UPDATE SET
+                    object_class=excluded.object_class,first_seen_s=excluded.first_seen_s,
+                    last_seen_s=excluded.last_seen_s,bbox_json=excluded.bbox_json,
+                    trajectory_json=excluded.trajectory_json,confidence=excluded.confidence,
+                    speed_kmh=excluded.speed_kmh,speed_quality=excluded.speed_quality,
+                    helmet_class=excluded.helmet_class,
+                    observations=excluded.observations,active=excluded.active""", values)
+                if object_class == "pedestrian":
+                    continue
                 conn.execute("""INSERT INTO vehicle_tracks
                     (session_id,track_id,vehicle_class,first_seen_s,last_seen_s,bbox_json,
                      trajectory_json,confidence,speed_kmh,speed_quality,observations,active)
@@ -169,7 +216,7 @@ class SQLiteStore:
                     trajectory_json=excluded.trajectory_json,confidence=excluded.confidence,
                     speed_kmh=excluded.speed_kmh,speed_quality=excluded.speed_quality,
                     observations=excluded.observations,active=excluded.active""",
-                    (session_id, track["track_id"], track["vehicle_class"], track["first_seen_s"],
+                    (session_id, track["track_id"], object_class, track["first_seen_s"],
                      track["last_seen_s"], json.dumps(track["bbox_xyxy"]),
                      json.dumps(track["trajectory"]), track.get("confidence"), track.get("speed_kmh"),
                      track["speed_quality"], track["observations"], int(track["active"])))
@@ -243,15 +290,16 @@ class SQLiteStore:
 
     def list_tracks(self, session_id: str) -> list[dict]:
         with self._connect() as conn:
-            rows = conn.execute("""SELECT track_id,vehicle_class,first_seen_s,last_seen_s,bbox_json,
-                trajectory_json,confidence,speed_kmh,speed_quality,observations,active
-                FROM vehicle_tracks WHERE session_id=? ORDER BY CAST(track_id AS INTEGER),track_id""",
+            rows = conn.execute("""SELECT track_id,object_class,first_seen_s,last_seen_s,bbox_json,
+                trajectory_json,confidence,speed_kmh,speed_quality,helmet_class,observations,active
+                FROM tracked_objects WHERE session_id=? ORDER BY CAST(track_id AS INTEGER),track_id""",
                 (session_id,)).fetchall()
         tracks = []
         for row in rows:
             track = dict(row)
             track["bbox_xyxy"] = json.loads(track.pop("bbox_json"))
             track["trajectory"] = json.loads(track.pop("trajectory_json"))
+            track["vehicle_class"] = track["object_class"]
             track["active"] = bool(track["active"])
             tracks.append(track)
         return tracks
@@ -266,6 +314,7 @@ class SQLiteStore:
             tracks = conn.execute("""SELECT COUNT(*) AS tracks,
                 COALESCE(SUM(speed_kmh IS NOT NULL),0) AS valid_speed
                 FROM vehicle_tracks""").fetchone()
+            pedestrians = conn.execute("SELECT COUNT(*) FROM tracked_objects WHERE object_class='pedestrian'").fetchone()[0]
             events = conn.execute("""SELECT COUNT(*) AS events,
                 COALESCE(SUM(review_status='pending'),0) AS pending,
                 COALESCE(SUM(review_status IN ('verified','rejected')),0) AS reviewed
@@ -275,6 +324,7 @@ class SQLiteStore:
         return {"sessions": int(session["sessions"]), "completed_sessions": int(session["completed"]),
                 "frames_processed": int(session["frames"]), "vehicle_tracks": int(tracks["tracks"]),
                 "tracks_with_valid_speed": int(tracks["valid_speed"]),
+                "pedestrians": int(pedestrians),
                 "events": int(events["events"]), "pending_events": int(events["pending"]),
                 "reviewed_events": int(events["reviewed"]),
                 "activity": [{"day": row["day"], "sessions": int(row["sessions"])} for row in reversed(activity)]}

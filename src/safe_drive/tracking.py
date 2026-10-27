@@ -16,6 +16,7 @@ class TrackRecord:
     confidence: float | None
     speed_kmh: float | None
     speed_quality: str
+    helmet_class: str | None = None
     observations: int = 0
     active: bool = True
     trajectory: deque = field(default_factory=deque, repr=False)
@@ -40,7 +41,8 @@ class TrackRegistry:
     def observe(self, track_id: str | int, timestamp_s: float, bbox_xyxy,
                 vehicle_class: str, confidence: float | None,
                 speed_kmh: float | None = None,
-                speed_quality: str = "uncalibrated") -> TrackRecord:
+                speed_quality: str = "uncalibrated",
+                helmet_class: str | None = None) -> TrackRecord:
         timestamp_s = float(timestamp_s)
         bbox = [float(value) for value in bbox_xyxy]
         if len(bbox) != 4 or not all(math.isfinite(v) for v in [timestamp_s, *bbox]):
@@ -64,6 +66,7 @@ class TrackRegistry:
         rec.confidence = confidence
         rec.speed_kmh = speed_kmh if speed_kmh is not None and math.isfinite(speed_kmh) else None
         rec.speed_quality = speed_quality if rec.speed_kmh is not None else "uncalibrated"
+        rec.helmet_class = helmet_class
         rec.active = True
         rec.observations += 1
         rec.trajectory.append(((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2))

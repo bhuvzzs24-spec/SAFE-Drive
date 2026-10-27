@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict, deque
 import json
+import os
 from pathlib import Path
 import threading
 import time
@@ -15,6 +16,27 @@ from .speed import SpeedEstimator
 from .tracking import TrackRegistry
 
 VEHICLE_CLASSES = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
+DETECTION_CLASSES = {0: "pedestrian", **VEHICLE_CLASSES}
+_SUPPORTED_CLASS_NAMES = {
+    "person": "pedestrian", "pedestrian": "pedestrian",
+    "car": "car", "motorcycle": "motorcycle", "motorbike": "motorcycle",
+    "bus": "bus", "truck": "truck",
+}
+
+
+def detector_class_map(names) -> dict[int, str]:
+    """Map the detector's declared labels to supported object categories."""
+    if isinstance(names, dict):
+        try:
+            labels = [(int(index), label) for index, label in names.items()]
+        except (TypeError, ValueError):
+            return {}
+    elif isinstance(names, (list, tuple)):
+        labels = list(enumerate(names))
+    else:
+        return {}
+    return {index: _SUPPORTED_CLASS_NAMES[str(label).strip().lower()]
+            for index, label in labels if str(label).strip().lower() in _SUPPORTED_CLASS_NAMES}
 
 
 def run_video(video: Path | str, calibration: Path | None, model_path: str, out_video: Path,
@@ -49,7 +71,15 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
             cal = {}
             calibration_error = "Calibration is invalid. Detection/tracking will continue; speed is unavailable."
     detector = YOLO(model_path)
+    class_map = detector_class_map(getattr(detector, "names", None))
+    if not class_map:
+        raise SystemExit("Detector labels do not include supported pedestrian or vehicle classes.")
     tracker = DeepSort(max_age=30)
+    helmet_model = None
+    helmet_weights = os.environ.get("SAFE_DRIVE_HELMET_MODEL", "").strip()
+    if helmet_weights:
+        from .helmet import HelmetInference
+        helmet_model = HelmetInference.from_path(helmet_weights)
     source_text = str(video)
     is_stream = source_text.lower().startswith(("rtsp://", "rtsps://"))
     if is_stream and hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC") and hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
@@ -96,11 +126,23 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
             result = detector(frame, verbose=False, conf=confidence)[0]
             for box in result.boxes:
                 cls, conf = int(box.cls[0]), float(box.conf[0])
-                if cls not in VEHICLE_CLASSES:
+                if cls not in class_map:
                     continue
                 x1, y1, x2, y2 = map(float, box.xyxy[0].cpu().numpy())
-                detections.append(([x1, y1, x2 - x1, y2 - y1], conf, VEHICLE_CLASSES[cls]))
+                detections.append(([x1, y1, x2 - x1, y2 - y1], conf, class_map[cls]))
             tracks = tracker.update_tracks(detections, frame=frame)
+            helmet_by_track = {}
+            if helmet_model:
+                person_boxes = []
+                for candidate in tracks:
+                    if not candidate.is_confirmed() or candidate.time_since_update > 0:
+                        continue
+                    class_getter = getattr(candidate, "get_det_class", None)
+                    if class_getter and class_getter() == "pedestrian":
+                        person_boxes.append((str(candidate.track_id),
+                                             [float(v) for v in candidate.to_ltrb()]))
+                if person_boxes:
+                    helmet_by_track = helmet_model.associate(person_boxes, helmet_model.detect(frame))
             active = []
             for track in tracks:
                 if not track.is_confirmed() or track.time_since_update > 0:
@@ -110,6 +152,7 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
                 class_getter = getattr(track, "get_det_class", None)
                 conf_getter = getattr(track, "get_det_conf", None)
                 vehicle_class = (class_getter() if class_getter else None) or "vehicle"
+                helmet_class = helmet_by_track.get(tid) if vehicle_class == "pedestrian" else None
                 confidence_value = conf_getter() if conf_getter else None
                 track_confidence = float(confidence_value) if confidence_value is not None else None
                 position = None
@@ -117,8 +160,9 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
                 if plane is not None:
                     x_m, y_m = plane.bottom_centres([box])[0]
                     position = (float(x_m), float(y_m))
-                    estimate = speed.update(tid, *position, now)
                     locations[tid].append((now, *position))
+                    if vehicle_class != "pedestrian":
+                        estimate = speed.update(tid, *position, now)
                 velocity = (0.0, 0.0)
                 if position is not None and len(locations[tid]) >= 2:
                     a, b = locations[tid][0], locations[tid][-1]
@@ -129,11 +173,14 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
                     tid, now, box, str(vehicle_class), track_confidence,
                     estimate.speed_kmh if estimate else None,
                     estimate.quality if estimate else "uncalibrated",
+                    helmet_class=helmet_class,
                 )
-                speed_event = speed_rule.update(
-                    tid, estimate.speed_kmh if estimate else None, now,
-                    estimate.quality if estimate else "uncalibrated", track_confidence,
-                )
+                speed_event = None
+                if vehicle_class != "pedestrian":
+                    speed_event = speed_rule.update(
+                        tid, estimate.speed_kmh if estimate else None, now,
+                        estimate.quality if estimate else "uncalibrated", track_confidence,
+                    )
                 if speed_event:
                     speed_event.update({"camera_id": cal.get("camera_id", "unspecified"),
                                         "source": event_source, "frame": frame_index})
@@ -145,6 +192,7 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
                                "velocity": velocity, "speed": estimate.speed_kmh if estimate else None,
                                "speed_quality": estimate.quality if estimate else "uncalibrated",
                                "class": str(vehicle_class), "confidence": track_confidence,
+                               "helmet_class": helmet_class,
                                "speed_violation": speed_event is not None})
                 color = ((0, 0, 255) if speed_event else
                          (0, 200, 0) if estimate and estimate.speed_kmh is not None else (0, 180, 255))
@@ -153,7 +201,12 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
                 label = f"{vehicle_class} ID {tid}"
                 if track_confidence is not None:
                     label += f" {track_confidence:.2f}"
-                label += " | " + (f"{estimate.speed_kmh:.1f} km/h" if estimate and estimate.speed_kmh is not None else "Uncalibrated — speed unavailable" if plane is None else "calibrating")
+                speed_label = (f"{estimate.speed_kmh:.1f} km/h" if estimate and estimate.speed_kmh is not None
+                               else "speed unavailable" if vehicle_class == "pedestrian" or plane is None
+                               else "calibrating")
+                label += " | " + speed_label
+                if helmet_class:
+                    label += " | " + helmet_class.replace("_", " ")
                 if speed_event:
                     label += " | SPEED REVIEW"
                 cv2.putText(frame, label, (x1, max(20, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.52, color, 2)
