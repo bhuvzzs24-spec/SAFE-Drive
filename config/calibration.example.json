@@ -1,0 +1,7 @@
+{
+  "camera_id": "site-01-camera-01",
+  "image_points_px": [[320, 700], [960, 700], [520, 420], [760, 420]],
+  "road_points_m": [[0, 0], [7, 0], [0, 20], [7, 20]],
+  "calibration_source": "REPLACE_WITH_MEASURED_CORRESPONDENCES",
+  "notes": "Example coordinates only. Measure visible road-plane points at the deployment camera."
+}

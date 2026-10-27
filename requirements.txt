@@ -1,0 +1,11 @@
+# Core research analysis
+numpy>=1.24
+PyYAML>=6.0
+
+# Optional video pipeline: pip install -e '.[vision]'
+# opencv-python>=4.8
+# ultralytics>=8.2
+# deep-sort-realtime>=1.3
+
+# Optional OCR (disabled by default): pip install -e '.[ocr]'
+# easyocr>=1.7
