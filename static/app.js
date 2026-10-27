@@ -61,6 +61,7 @@ form.addEventListener('submit', async event => {
 
 function showJob(id, isLive) {
   activeJobId = id;
+  document.getElementById('system-state').textContent = isLive ? 'RTSP CONNECTING' : 'VIDEO ANALYSIS RUNNING';
   const panel = document.getElementById('results');
   panel.hidden = false;
   panel.scrollIntoView({behavior: 'smooth', block: 'start'});
@@ -81,6 +82,7 @@ async function pollJob(id) {
     const status = document.getElementById('job-status');
     status.textContent = job.status.toUpperCase();
     if (job.status === 'queued' || job.status === 'running' || job.status === 'stopping') {
+      document.getElementById('system-state').textContent = job.live ? (job.status === 'stopping' ? 'RTSP STOPPING' : job.status === 'running' && job.frames_processed ? 'RTSP STREAM ACTIVE' : 'RTSP CONNECTING') : `VIDEO ${job.status.toUpperCase()}`;
       document.getElementById('job-summary').textContent = job.status === 'queued' ? 'Queued locally. The analysis worker will start shortly…' : job.status === 'stopping' ? 'Stopping the camera stream…' : job.live ? `Live analysis active · ${job.frames_processed || 0} frames processed · event review updates as alerts appear` : 'Running detection, tracking, calibration and approach-risk screening…';
       if (job.status === 'stopping') document.getElementById('stop-button').disabled = true;
       if (job.status === 'running' && job.live) {
@@ -94,6 +96,7 @@ async function pollJob(id) {
     button.disabled = false;
     button.querySelector('span:nth-child(2)').textContent = 'Run another analysis';
     if (job.status === 'failed') {
+      document.getElementById('system-state').textContent = 'INPUT ERROR';
       document.getElementById('job-summary').textContent = 'Analysis did not complete.';
       const error = document.getElementById('job-error');
       error.hidden = false;
@@ -101,11 +104,13 @@ async function pollJob(id) {
       return;
     }
     if (job.status === 'cancelled') {
+      document.getElementById('system-state').textContent = 'DEMO / UPLOAD MODE';
       document.getElementById('job-summary').textContent = 'Live analysis was stopped before it started.';
       return;
     }
     document.getElementById('stop-button').hidden = true;
-    document.getElementById('job-summary').textContent = `Completed · ${job.name} · ${job.frames_processed || 0} frames${job.warning ? ` · ${job.warning}` : ''} · manual review required`;
+    document.getElementById('system-state').textContent = `${job.source_mode === 'rtsp' ? 'RTSP' : 'VIDEO'} ANALYSIS COMPLETE`;
+    document.getElementById('job-summary').textContent = `Completed · ${job.source_mode || 'unknown source'} · ${job.name} · ${job.frames_processed || 0} frames${job.warning ? ` · ${job.warning}` : ''} · manual review required`;
     document.getElementById('results-content').hidden = false;
     document.querySelector('.video-wrap').hidden = false;
     document.getElementById('job-error').hidden = true;

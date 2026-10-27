@@ -40,6 +40,7 @@ The dashboard stores uploaded clips, calibration files, and outputs locally unde
 | `src/safe_drive/risk.py` | Transparent advisory score with explicit missing-signal fields |
 | `src/safe_drive/events.py` | Append-only JSONL event writer and content-addressed event ID |
 | `src/safe_drive/cli.py` | Optional video-file and RTSP detector/tracker processing path |
+| `src/safe_drive/camera_input.py` | Demo/video/webcam/RTSP configuration normalization and explicit fallback state |
 | `config/calibration.example.json` | Example calibration file structure; values are placeholders only |
 | `docs/RESEARCH_PLAN.md` | Proposed research question, split plan, baselines, and metrics |
 | `legacy/` | Unmodified starter scripts retained for comparison, with known limitations documented |

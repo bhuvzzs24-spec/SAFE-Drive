@@ -16,6 +16,7 @@ from flask import Flask, abort, jsonify, render_template, request, send_file, se
 from werkzeug.utils import secure_filename
 
 from safe_drive.cli import run_video
+from safe_drive.camera_input import CameraConfigurationError, load_camera_source, resolve_camera_source
 from safe_drive.geometry import RoadPlane
 
 ROOT = Path(__file__).resolve().parent
@@ -25,6 +26,7 @@ JOB_ID = re.compile(r"^[a-f0-9]{32}$")
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
 WORKERS = ThreadPoolExecutor(max_workers=1, thread_name_prefix="safe-drive")
+CAMERA_CONFIG = Path(os.environ.get("SAFE_DRIVE_CAMERA_CONFIG", ROOT / "config/camera.json"))
 
 
 def create_app() -> Flask:
@@ -57,7 +59,15 @@ def create_app() -> Flask:
     @app.get("/")
     def home():
         session.setdefault("csrf_token", secrets.token_urlsafe(32))
-        return render_template("index.html", csrf_token=session["csrf_token"], model=os.environ.get("SAFE_DRIVE_MODEL", "yolov8n.pt"))
+        try:
+            default_source = load_camera_source(CAMERA_CONFIG)
+            camera_status = default_source.status_label
+            camera_id = default_source.camera_id
+        except CameraConfigurationError:
+            camera_status, camera_id = "CAMERA CONFIG INVALID", ""
+        return render_template("index.html", csrf_token=session["csrf_token"],
+                               model=os.environ.get("SAFE_DRIVE_MODEL", "yolov8n.pt"),
+                               camera_status=camera_status, camera_id=camera_id)
 
     def job_or_404(job_id: str) -> dict:
         if not JOB_ID.fullmatch(job_id):
@@ -131,6 +141,7 @@ def create_app() -> Flask:
         stop_event = threading.Event()
         with JOBS_LOCK:
             JOBS[job_id] = {"id": job_id, "name": safe_name, "status": "queued", "model": model,
+                            "source_mode": "uploaded_video",
                             "stop_event": stop_event}
         WORKERS.submit(analyze, job_id, video_path, calibration_path, model, stop_event, None, safe_name)
         return jsonify(id=job_id, status="queued"), 202
@@ -138,8 +149,22 @@ def create_app() -> Flask:
     @app.post("/api/camera-jobs")
     def create_camera_job():
         stream_url = request.form.get("stream_url", "").strip()
-        if not stream_url.lower().startswith(("rtsp://", "rtsps://")) or len(stream_url) > 2048:
-            return jsonify(error="Enter a valid RTSP or RTSPS camera stream address."), 400
+        if stream_url:
+            try:
+                configured_source = resolve_camera_source("rtsp", stream_url,
+                                                          request.form.get("camera_id", "camera"))
+            except CameraConfigurationError as exc:
+                return jsonify(error=str(exc)), 400
+        else:
+            try:
+                configured_source = load_camera_source(CAMERA_CONFIG)
+            except CameraConfigurationError as exc:
+                return jsonify(error=str(exc)), 400
+        if configured_source.mode != "rtsp" or not configured_source.source:
+            return jsonify(error="No RTSP camera is configured. Enter a stream URL or configure SAFE_DRIVE_CAMERA_URL."), 400
+        if len(str(configured_source.source)) > 2048:
+            return jsonify(error="Camera stream URL is too long."), 400
+        stream_url = str(configured_source.source)
         calibration_upload = request.files.get("calibration")
         if not calibration_upload or not calibration_upload.filename:
             return jsonify(error="Choose the calibration JSON for this camera."), 400
@@ -163,10 +188,10 @@ def create_app() -> Flask:
         calibration_path = folder / "calibration.json"
         calibration_path.write_text(json.dumps(calibration, indent=2), encoding="utf-8")
         stop_event = threading.Event()
-        camera_label = str(calibration.get("camera_id", "camera"))[:80]
+        camera_label = str(calibration.get("camera_id") or configured_source.camera_id)[:80]
         with JOBS_LOCK:
             JOBS[job_id] = {"id": job_id, "name": camera_label, "status": "queued", "model": model,
-                            "stop_event": stop_event, "live": True}
+                            "source_mode": "rtsp", "stop_event": stop_event, "live": True}
         WORKERS.submit(analyze, job_id, stream_url, calibration_path, model,
                        stop_event, duration_s, camera_label)
         return jsonify(id=job_id, status="queued"), 202

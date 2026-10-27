@@ -51,6 +51,8 @@ Open `http://127.0.0.1:5170`. Choose **Video file** to upload a clip, or **Live 
 
 Live mode connects to the camera; it does not install software into camera firmware. The camera must expose an RTSP/RTSPS stream reachable from this computer, and OpenCV must support its transport and codec. This version has no ONVIF discovery or automatic reconnection and cannot guarantee real-time throughput on every computer. Some consumer cameras do not provide RTSP; check the camera or NVR settings.
 
+If no camera is configured, the dashboard explicitly reports **Demo / Upload Mode**. To configure a default source, copy `config/camera.example.json` to the ignored `config/camera.json`, then set its `mode` and source fields. Environment variables override the JSON config: `SAFE_DRIVE_CAMERA_URL`, `SAFE_DRIVE_CAMERA_ID`, and `SAFE_DRIVE_CAMERA_MODE`. `SAFE_DRIVE_CAMERA_URL` takes priority for RTSP. Copy `.env.example` for reference; the app does not automatically load `.env`, so export values in the shell before launching. Never commit camera credentials. The current runner supports upload and RTSP capture; webcam parsing is present but webcam capture wiring is a later stage.
+
 ## Calibration comes before speed claims
 
 Copy `config/calibration.example.json` to a site-specific file. Replace the example correspondences with at least four well-spread, non-collinear points measured on the road plane. For evaluation, reserve independent measured distances/vehicles to estimate calibration error. A homography is valid only for a fixed camera and the road surface represented by those points; do not report speeds from the example values.
@@ -73,6 +75,8 @@ No accuracy, safety, or publication claim is made by this repository. Results re
 See [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) for a paper-ready experimental protocol. Minimum reporting should include detector precision/recall and mAP at a declared IoU, tracking HOTA/IDF1, speed MAE/RMSE against independent radar or surveyed ground truth, near-miss event precision/recall at a predefined event definition, calibration error, latency/FPS on named hardware, confidence intervals, and failure cases. Split by camera/site and time, not randomly by adjacent video frames.
 
 See [`docs/PROJECT_REPORT.md`](docs/PROJECT_REPORT.md) for the current project report, implementation inventory, architecture, limits, and next research milestones.
+
+Run the implemented input-configuration tests with `PYTHONPATH=src python -m unittest discover -s tests -v`. The broader vision/event test suite is still pending.
 
 ## License and data
 

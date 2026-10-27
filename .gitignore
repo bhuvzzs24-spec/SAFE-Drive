@@ -1,4 +1,6 @@
 .venv/
+.env
+config/camera.json
 __pycache__/
 *.py[cod]
 *.egg-info/

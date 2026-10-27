@@ -25,7 +25,7 @@
     </aside>
 
     <main class="main-content">
-      <header class="topbar"><div class="breadcrumb">Research <span>/</span> Video analysis</div><div class="top-right"><span class="system-status"><i></i> SYSTEM READY</span><span class="avatar">SD</span></div></header>
+      <header class="topbar"><div class="breadcrumb">Research <span>/</span> Video analysis</div><div class="top-right"><span class="system-status"><i></i> <span id="system-state">{{ camera_status }}</span></span><span class="avatar">SD</span></div></header>
       <section class="page-heading" id="analysis">
         <div><div class="eyebrow"><span class="eyebrow-line"></span> TRAFFIC SAFETY LAB <span class="eyebrow-tag">EXPERIMENTAL</span></div><h1>Video analysis</h1><p>Screen calibrated traffic footage for vehicle motion and pairwise approach risk.</p></div>
         <div class="heading-meta"><span class="meta-label">PIPELINE</span><strong>DETECT <b>→</b> TRACK <b>→</b> ANALYZE</strong><small>Human review required for every alert</small></div>
@@ -48,8 +48,8 @@
             </div>
             <div id="camera-source" hidden>
               <label class="field-label" for="stream-url">Camera stream address <span>RTSP / RTSPS</span></label>
-              <input class="text-input camera-input" id="stream-url" name="stream_url" type="password" placeholder="rtsp://camera-address:554/stream" maxlength="2048" autocomplete="off" spellcheck="false" disabled>
-              <div class="camera-help">Enter this camera’s RTSP stream URL. The address is used for the session and is not written to the event log.</div>
+              <input class="text-input camera-input" id="stream-url" name="stream_url" type="password" placeholder="Configured camera URL or rtsp://address:554/stream" maxlength="2048" autocomplete="off" spellcheck="false" disabled>
+              <div class="camera-help">{{ camera_status }}{% if camera_id and camera_id != 'demo' %} · {{ camera_id }}{% endif %}. A form value overrides environment/JSON config for this session. The URL is omitted from event records.</div>
               <div class="duration-row"><label class="field-label" for="duration">Capture duration</label><select class="text-input" id="duration" name="duration_s" disabled><option value="60">1 minute</option><option value="300" selected>5 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">60 minutes</option></select></div>
             </div>
             <div class="field-row">
