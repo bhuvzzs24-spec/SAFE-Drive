@@ -246,7 +246,8 @@ function selectTrack(track, row) {
   detail.replaceChildren();
   const text = document.createElement('span');
   const speed = track.speed_kmh == null ? 'Speed unavailable' : `${Number(track.speed_kmh).toFixed(1)} km/h (${track.speed_quality})`;
-  text.innerHTML = `<strong>Track ${escapeHtml(track.track_id)} · ${escapeHtml(track.vehicle_class)}</strong> · ${escapeHtml(speed)} · ${Number(track.observations || 0)} observations · seen ${Number(track.first_seen_s || 0).toFixed(2)}–${Number(track.last_seen_s || 0).toFixed(2)} s`;
+  const helmet = track.helmet_class ? ` · helmet model: ${String(track.helmet_class).replaceAll('_', ' ')}` : '';
+  text.innerHTML = `<strong>Track ${escapeHtml(track.track_id)} · ${escapeHtml(track.vehicle_class)}</strong> · ${escapeHtml(speed)}${escapeHtml(helmet)} · ${Number(track.observations || 0)} observations · seen ${Number(track.first_seen_s || 0).toFixed(2)}–${Number(track.last_seen_s || 0).toFixed(2)} s`;
   detail.append(text);
   const related = currentEvents.filter(event => String(event.track_id) === String(track.track_id) ||
     (event.tracks || []).some(item => String(item.id) === String(track.track_id)) ||

@@ -83,3 +83,14 @@ Run the tests with `python -m unittest discover -s tests -v`. The tests cover ca
 ## License and data
 
 No license or dataset is bundled yet. Before publishing or accepting external contributions, choose a license and confirm that every dataset/model weight permits the intended research and redistribution. Never commit private traffic footage, generated plate crops, credentials, or local databases.
+# Final implementation report
+
+See [SAFE-Drive final report](docs/SAFE_DRIVE_FINAL_REPORT.md) for verified features, setup, test results, model requirements, and current limitations. A PDF copy is available at [output/pdf/SAFE_DRIVE_FINAL_REPORT.pdf](output/pdf/SAFE_DRIVE_FINAL_REPORT.pdf).
+
+## Capability status
+
+- YOLO detection and DeepSORT tracking are integrated, but real inference has not been verified because compatible weights and sample traffic footage are not included.
+- Real-world speed requires camera calibration; without it, speed is unavailable.
+- Optional helmet classification requires compatible trained weights via `SAFE_DRIVE_HELMET_MODEL`; no such model is bundled.
+- Accident detection is not implemented. Approach-risk screening is not an accident determination.
+- Do not commit CCTV footage, credentials, databases, `.venv`, or model weights.

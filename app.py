@@ -70,7 +70,8 @@ def create_app() -> Flask:
         return render_template("index.html", csrf_token=session["csrf_token"],
                                model=os.environ.get("SAFE_DRIVE_MODEL", "yolov8n.pt"),
                                camera_status=camera_status, camera_id=camera_id,
-                               database_label=STORE.path.name)
+                               database_label=STORE.path.name,
+                               helmet_model_available=Path(os.environ.get("SAFE_DRIVE_HELMET_MODEL", "")).expanduser().is_file())
 
     def job_or_404(job_id: str) -> dict:
         if not JOB_ID.fullmatch(job_id):
