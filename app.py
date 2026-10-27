@@ -17,7 +17,6 @@ from werkzeug.utils import secure_filename
 
 from safe_drive.cli import run_video
 from safe_drive.camera_input import CameraConfigurationError, load_camera_source, resolve_camera_source
-from safe_drive.geometry import RoadPlane
 from safe_drive.rules import SpeedLimitRule
 from safe_drive.storage import SQLiteStore
 
@@ -70,7 +69,8 @@ def create_app() -> Flask:
             camera_status, camera_id = "CAMERA CONFIG INVALID", ""
         return render_template("index.html", csrf_token=session["csrf_token"],
                                model=os.environ.get("SAFE_DRIVE_MODEL", "yolov8n.pt"),
-                               camera_status=camera_status, camera_id=camera_id)
+                               camera_status=camera_status, camera_id=camera_id,
+                               database_label=STORE.path.name)
 
     def job_or_404(job_id: str) -> dict:
         if not JOB_ID.fullmatch(job_id):
@@ -135,6 +135,8 @@ def create_app() -> Flask:
         if not upload or not upload.filename:
             return None, "missing"
         try:
+            from safe_drive.geometry import RoadPlane
+
             calibration = json.load(upload.stream)
             plane = RoadPlane(calibration["image_points_px"], calibration["road_points_m"])
             plane.transform(plane.image_points)
@@ -297,6 +299,10 @@ def create_app() -> Flask:
     @app.get("/api/sessions")
     def get_sessions():
         return jsonify(sessions=STORE.list_sessions())
+
+    @app.get("/api/analytics")
+    def get_analytics():
+        return jsonify(STORE.analytics())
 
     def session_or_404(session_id: str) -> dict:
         if not JOB_ID.fullmatch(session_id):

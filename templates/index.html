@@ -4,115 +4,148 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token }}">
-  <meta name="theme-color" content="#0a0e12">
-  <title>SAFE-Drive | Research Console</title>
+  <meta name="theme-color" content="#111713">
+  <title>SAFE-Drive | Road Safety Intelligence</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
 <body>
-  <div class="app-shell">
-    <aside class="sidebar">
-      <a class="brand" href="/" aria-label="SAFE-Drive home">
-        <span class="brand-mark"><span></span><span></span><span></span></span>
-        <span><strong>SAFE<span class="brand-accent">·</span>DRIVE</strong><small>RESEARCH CONSOLE</small></span>
-      </a>
-      <div class="side-label">WORKSPACE</div>
-      <button class="nav-item" type="button" data-mode="camera"><span class="nav-icon">◉</span> Live Monitoring <span class="nav-state">RTSP</span></button>
-      <a class="nav-item active" href="#analysis"><span class="nav-icon">▣</span> Video Analysis <span class="nav-dot"></span></a>
-      <a class="nav-item" href="#track-table"><span class="nav-icon">⌖</span> Vehicle Tracking <span class="nav-state">READY</span></a>
-      <button class="nav-item nav-disabled" type="button" disabled><span class="nav-icon">◌</span> Helmet Compliance <span class="nav-state">MODEL MISSING</span></button>
-      <a class="nav-item" href="#events"><span class="nav-icon">↗</span> Speed Violations <span class="nav-state">CONFIGURE</span></a>
-      <a class="nav-item" href="#events"><span class="nav-icon">⌁</span> Event Review <span class="nav-state">SQLITE</span></a>
-      <button class="nav-item nav-disabled" type="button" disabled><span class="nav-icon">▤</span> Analytics <span class="nav-state">PLANNED</span></button>
-      <button class="nav-item" type="button" data-mode="camera"><span class="nav-icon">▧</span> Camera Management <span class="nav-state">RTSP</span></button>
-      <button class="nav-item nav-disabled" type="button" disabled><span class="nav-icon">⚙</span> Settings <span class="nav-state">PLANNED</span></button>
-      <div class="sidebar-bottom">
-        <div class="local-card"><span class="local-led"></span><span><b>LOCAL SESSION</b><small>Footage stays on this device</small></span></div>
-        <div class="version">SAFE-DRIVE <span>v0.3.0</span></div>
-      </div>
-    </aside>
+<div class="app-shell">
+  <aside class="sidebar">
+    <a class="brand" href="#overview" data-page-link="overview" aria-label="SAFE-Drive overview">
+      <span class="brand-mark"><svg viewBox="0 0 36 36" aria-hidden="true"><path d="M18 4 29 8v9c0 7.5-4.4 12.1-11 15-6.6-2.9-11-7.5-11-15V8l11-4Z"/><path d="M11 20h4l2.4-6 3.2 11 2.2-5H27"/></svg></span>
+      <span class="brand-copy"><strong>SAFE<span>·</span>DRIVE</strong><small>ROAD SAFETY INTELLIGENCE</small></span>
+    </a>
+    <div class="sidebar-caption">WORKSPACE</div>
+    <nav class="main-nav" aria-label="Main navigation">
+      <button class="nav-item active" type="button" data-page-link="overview"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="5" rx="2"/><rect x="13" y="10" width="8" height="11" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/></svg><span>Overview</span></button>
+      <button class="nav-item" type="button" data-page-link="analysis"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3z"/></svg><span>Video Analysis</span></button>
+      <button class="nav-item" type="button" data-page-link="tracking"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M5 21c.6-4 2.8-6 7-6s6.4 2 7 6M4 5l2 1m14-1-2 1M3 12h2m14 0h2"/></svg><span>Vehicle Tracking</span></button>
+      <button class="nav-item" type="button" data-page-link="helmets"><svg viewBox="0 0 24 24"><path d="M4 15a8 8 0 0 1 16 0v2H4v-2Z"/><path d="M12 7v3m-7 4h14M8 17v2m8-2v2"/></svg><span>Helmet Compliance</span><span class="nav-state" id="helmet-nav-state">NOT ACTIVE</span></button>
+      <button class="nav-item" type="button" data-page-link="speed"><svg viewBox="0 0 24 24"><path d="M4 18a9 9 0 1 1 16 0"/><path d="m12 13 4-4M6 18h12"/><circle cx="12" cy="13" r="1"/></svg><span>Speed Violations</span></button>
+      <button class="nav-item" type="button" data-page-link="events"><svg viewBox="0 0 24 24"><path d="M7 3h10v18H7zM9 7h6m-6 4h6m-6 4h4"/></svg><span>Event Review</span><span class="nav-state" id="pending-nav-state">—</span></button>
+      <button class="nav-item" type="button" data-page-link="analytics"><svg viewBox="0 0 24 24"><path d="M4 20V11m5 9V5m6 15v-7m5 7V8M2 20h20"/></svg><span>Analytics</span></button>
+      <button class="nav-item" type="button" data-page-link="cameras"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg><span>Camera Management</span></button>
+      <button class="nav-item" type="button" data-page-link="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.2 1-1.6 2.8-1.5-.6a8 8 0 0 1-1.5.9l-.2 1.6h-3.2l-.2-1.6a8 8 0 0 1-1.5-.9l-1.5.6-1.6-2.8 1.2-1a7 7 0 0 1 0-1.8l-1.2-1 1.6-2.8 1.5.6a8 8 0 0 1 1.5-.9l.2-1.6h3.2l.2 1.6a8 8 0 0 1 1.5.9l1.5-.6 1.6 2.8-1.2 1a7 7 0 0 1-.1 1.7Z"/></svg><span>Settings</span></button>
+    </nav>
+    <div class="sidebar-spacer"></div>
+    <div class="sidebar-status"><span class="status-orb"></span><div><strong>LOCAL WORKSPACE</strong><small>Footage remains on this device</small></div></div>
+    <div class="sidebar-footer"><span>SAFE-DRIVE</span><span>RESEARCH EDITION</span></div>
+  </aside>
 
-    <main class="main-content">
-      <header class="topbar"><div class="breadcrumb">Research <span>/</span> Video analysis</div><div class="top-right"><span class="system-status"><i></i> <span id="system-state">{{ camera_status }}</span></span><span class="avatar">SD</span></div></header>
-      <section class="page-heading" id="analysis">
-        <div><div class="eyebrow"><span class="eyebrow-line"></span> TRAFFIC SAFETY LAB <span class="eyebrow-tag">EXPERIMENTAL</span></div><h1>Video analysis</h1><p>Screen calibrated traffic footage for vehicle motion and pairwise approach risk.</p></div>
-        <div class="heading-meta"><span class="meta-label">PIPELINE</span><strong>DETECT <b>→</b> TRACK <b>→</b> ANALYZE</strong><small>Human review required for every alert</small></div>
+  <div class="main-column">
+    <header class="topbar">
+      <div class="mobile-brand"><span class="brand-mark"><svg viewBox="0 0 36 36"><path d="M18 4 29 8v9c0 7.5-4.4 12.1-11 15-6.6-2.9-11-7.5-11-15V8l11-4Z"/><path d="M11 20h4l2.4-6 3.2 11 2.2-5H27"/></svg></span><strong>SAFE·DRIVE</strong></div>
+      <div class="breadcrumbs"><span>Workspace</span><b>/</b><strong id="current-page-title">Overview</strong></div>
+      <div class="topbar-right"><span class="mode-chip" id="header-mode">Research workspace</span><span class="system-status"><i></i><span id="system-state">{{ camera_status }}</span></span><span class="user-avatar">SD</span></div>
+    </header>
+
+    <main class="page-container">
+      <section class="page-view" id="page-overview" data-page="overview">
+        <div class="welcome-row"><div><p class="eyebrow">TRAFFIC INTELLIGENCE PLATFORM</p><h1>See the road more clearly.</h1><p class="page-lede">Turn traffic footage into reviewable vehicle tracks and road-safety signals.</p></div><button class="button button-primary" type="button" data-open-page="analysis"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Start an analysis</button></div>
+        <div class="overview-hero">
+          <div class="hero-copy"><span class="hero-kicker"><i></i> ANALYSIS WORKSPACE</span><h2>From video to<br><em>road insight.</em></h2><p>Analyze a recorded clip or connect an RTSP camera. Every result shown here comes from a real session and remains subject to human review.</p><button class="button button-light" type="button" data-open-page="analysis">Open video analysis <span>→</span></button></div>
+          <div class="hero-art" aria-hidden="true"><div class="radar-ring ring-one"></div><div class="radar-ring ring-two"></div><div class="road-lines"><i></i><i></i><i></i></div><div class="art-target target-one"><b></b><span>TRACK</span></div><div class="art-target target-two"><b></b><span>SAFETY</span></div><div class="art-route"></div><div class="art-label">REAL FOOTAGE · REAL MEASUREMENTS</div></div>
+        </div>
+        <div class="section-title-row"><div><p class="eyebrow">YOUR DATA</p><h2>Workspace activity</h2></div><button class="text-button" type="button" data-open-page="analytics">View analytics <span>→</span></button></div>
+        <div class="metric-grid">
+          <article class="metric-card"><span class="metric-icon green"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3z"/></svg></span><div><span>Analysis sessions</span><strong id="overview-session-count">—</strong></div><small>From saved history</small></article>
+          <article class="metric-card"><span class="metric-icon blue"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M5 21c.6-4 2.8-6 7-6s6.4 2 7 6"/></svg></span><div><span>Vehicle tracks</span><strong id="overview-track-count">—</strong></div><small>Persisted track summaries</small></article>
+          <article class="metric-card"><span class="metric-icon amber"><svg viewBox="0 0 24 24"><path d="M12 3 22 20H2L12 3Z"/><path d="M12 9v5m0 3h.01"/></svg></span><div><span>Needs review</span><strong id="overview-pending-count">—</strong></div><small>Unreviewed saved events</small></article>
+          <article class="metric-card"><span class="metric-icon red"><svg viewBox="0 0 24 24"><path d="M4 18a9 9 0 1 1 16 0"/><path d="m12 13 4-4M6 18h12"/></svg></span><div><span>Calibrated speed</span><strong id="overview-calibrated-count">—</strong></div><small>Tracks with valid estimates</small></article>
+        </div>
+        <div class="overview-lower">
+          <section class="surface-card recent-card"><div class="surface-heading"><div><p class="eyebrow">SESSION HISTORY</p><h2>Recent analysis</h2></div><button class="icon-button" type="button" id="refresh-history" aria-label="Refresh history"><svg viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 12-2L20 12M4 12l2.4 5a7 7 0 0 0 12-2"/></svg></button></div><div class="history-list" id="history-list"><div class="empty-inline">Loading saved analyses…</div></div></section>
+          <section class="surface-card camera-card"><div class="surface-heading"><div><p class="eyebrow">INPUT SOURCE</p><h2>Camera connection</h2></div><span class="source-indicator"><i></i><span>{{ camera_status }}</span></span></div><div class="camera-empty-visual"><svg viewBox="0 0 80 60"><rect x="7" y="9" width="48" height="40" rx="7"/><path d="m55 21 18-10v36L55 37z"/><circle cx="31" cy="29" r="9"/></svg></div><p class="camera-description">Connect a reachable RTSP/RTSPS stream from your IP camera or NVR. Camera firmware is not changed.</p><button class="button button-secondary" type="button" data-open-page="cameras">Manage camera sources <span>→</span></button></section>
+        </div>
+        <p class="research-note"><span>Research use</span> Outputs are screening signals, not verified incidents or enforcement evidence. Review each event and validate calibration before interpreting measurements.</p>
       </section>
 
-      <section class="workspace-grid">
-        <div class="panel upload-panel">
-          <div class="panel-head"><div><div class="panel-kicker">01 / INPUT</div><h2>New analysis</h2></div><span class="step-badge">CLIP OR LIVE CAMERA</span></div>
-          <form id="analysis-form">
-            <div class="mode-switch" role="tablist" aria-label="Analysis source">
-              <button class="mode-option selected" type="button" data-mode="file" role="tab" aria-selected="true">Video file</button>
-              <button class="mode-option" type="button" data-mode="camera" role="tab" aria-selected="false">Live IP camera</button>
-            </div>
-            <div id="file-source">
-              <label class="field-label" for="video-file">Traffic video <span>MP4 · MOV · MKV · AVI · WEBM</span></label>
-              <label class="dropzone" id="dropzone" for="video-file">
-                <input id="video-file" name="video" type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/x-msvideo,video/webm,.mp4,.mov,.mkv,.avi,.webm" required>
-                <span class="upload-glyph">↑</span><strong>Choose a video to analyze</strong><small>or drop a file here · max 300 MB</small><span class="file-name" id="video-name">No video selected</span>
-              </label>
-              <video class="source-preview" id="source-preview" controls playsinline hidden></video>
-            </div>
-            <div id="camera-source" hidden>
-              <label class="field-label" for="stream-url">Camera stream address <span>RTSP / RTSPS</span></label>
-              <input class="text-input camera-input" id="stream-url" name="stream_url" type="password" placeholder="Configured camera URL or rtsp://address:554/stream" maxlength="2048" autocomplete="off" spellcheck="false" disabled>
-              <div class="camera-help">{{ camera_status }}{% if camera_id and camera_id != 'demo' %} · {{ camera_id }}{% endif %}. A form value overrides environment/JSON config for this session. The URL is omitted from event records.</div>
-              <div class="duration-row"><label class="field-label" for="duration">Capture duration</label><select class="text-input" id="duration" name="duration_s" disabled><option value="60">1 minute</option><option value="300" selected>5 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">60 minutes</option></select></div>
-            </div>
-            <div class="field-row">
-              <div class="field-block"><label class="field-label" for="calibration-file">Camera calibration <span>OPTIONAL JSON</span></label><label class="file-picker"><span class="file-icon">⌗</span><span id="calibration-name">No calibration · speed unavailable</span><input id="calibration-file" name="calibration" type="file" accept=".json,application/json"></label></div>
-              <div class="field-block"><label class="field-label" for="model">Detector weights <span>LOCAL PATH</span></label><input class="text-input" id="model" name="model" value="{{ model }}" maxlength="240" autocomplete="off"></div>
-            </div>
-            <div class="field-row rule-row">
-              <div class="field-block"><label class="field-label" for="speed-limit">Speed limit <span>OPTIONAL · km/h</span></label><input class="text-input" id="speed-limit" name="speed_limit_kmh" type="number" min="1" max="250" step="1" placeholder="Disabled"></div>
-              <div class="field-block"><label class="field-label" for="speed-tolerance">Tolerance <span>km/h</span></label><input class="text-input" id="speed-tolerance" name="speed_tolerance_kmh" type="number" min="0" max="50" step="1" value="0"></div>
-              <div class="field-block"><label class="field-label" for="speed-confirm">Confirm for <span>SECONDS</span></label><input class="text-input" id="speed-confirm" name="speed_confirmation_s" type="number" min="0" max="30" step="0.1" value="1"></div>
-            </div>
-            <div class="calibration-note"><span>i</span><div><b>Calibration enables metric speed and TTC.</b> Without valid site calibration, object detection and tracking continue and speed is shown as unavailable. Example points are placeholders.</div></div>
-            <button class="primary-button" id="run-button" type="submit"><span class="button-icon">▷</span><span>Run video analysis</span><span class="button-arrow">↗</span></button>
-            <div class="form-foot"><span class="lock-icon">◇</span> Processed on this computer · stream URL is not logged</div>
-            <div class="inline-error" id="form-error" role="alert"></div>
-          </form>
-        </div>
-
-        <div class="panel pipeline-panel">
-          <div class="panel-head"><div><div class="panel-kicker">02 / METHOD</div><h2>Analysis pipeline</h2></div><span class="live-badge"><i></i> READY</span></div>
-          <div class="pipeline-list">
-            <div class="pipeline-step"><span class="step-icon detector-icon">▦</span><div><strong>Vehicle detection</strong><small>YOLO · vehicle classes</small></div><span class="step-state">ACTIVE</span></div>
-            <div class="pipeline-connector"></div>
-            <div class="pipeline-step"><span class="step-icon tracking-icon">⌖</span><div><strong>Track association</strong><small>DeepSORT · persistent IDs</small></div><span class="step-state">ACTIVE</span></div>
-            <div class="pipeline-connector"></div>
-            <div class="pipeline-step"><span class="step-icon geometry-icon">⌁</span><div><strong>Ground-plane motion</strong><small>Homography · metres / second</small></div><span class="step-state">CALIBRATED</span></div>
-            <div class="pipeline-connector"></div>
-            <div class="pipeline-step"><span class="step-icon risk-icon">△</span><div><strong>Approach-risk screen</strong><small>Closest approach · TTC estimate</small></div><span class="step-state">REVIEW</span></div>
+      <section class="page-view" id="page-analysis" data-page="analysis" hidden>
+        <div class="page-heading-row"><div><p class="eyebrow">VIDEO INTELLIGENCE</p><h1>Video Analysis</h1><p class="page-lede">Review the actual annotated output and measurements from your clip or camera session.</p></div><span class="quality-chip"><i></i> Local processing</span></div>
+        <div class="analysis-layout">
+          <div class="analysis-main-column">
+            <section class="viewer-card">
+              <div class="viewer-topline"><div><span class="viewer-live-dot"></span><div><strong>Analysis workspace</strong><small id="viewer-caption">Your video appears here when selected</small></div></div><span class="viewer-badge" id="viewer-mode-badge">READY</span></div>
+              <div class="video-stage" id="video-stage">
+                <div class="video-empty-state" id="video-empty-state"><div class="empty-camera-icon"><svg viewBox="0 0 64 52"><rect x="4" y="5" width="42" height="42" rx="7"/><path d="m46 17 14-9v36l-14-9z"/><circle cx="25" cy="26" r="9"/></svg></div><h2>Your road, in focus.</h2><p>Select a traffic video or connect a configured camera to see real detection overlays, track IDs, and calibrated speed estimates.</p><button class="button button-primary" id="empty-select-video" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Choose a video</button><span>MP4, MOV, MKV, AVI or WEBM · up to 300 MB</span></div>
+                <video class="source-preview" id="source-preview" controls playsinline hidden></video>
+              </div>
+              <div class="viewer-footer"><span><i></i> No overlays or metrics are shown until real footage is processed.</span><span id="viewer-frame-label">Input preview</span></div>
+            </section>
+            <section class="results-panel surface-card" id="results" hidden>
+              <div class="results-head"><div><p class="eyebrow">SESSION OUTPUT</p><h2>Analysis results</h2><p id="job-summary">Waiting for analysis…</p></div><div class="result-head-actions"><span class="job-pill" id="job-status">QUEUED</span><button class="button button-danger" id="stop-button" type="button" hidden>Stop camera</button></div></div>
+              <div class="job-error" id="job-error" hidden></div>
+              <div class="results-content" id="results-content" hidden>
+                <div class="video-comparison" id="video-comparison">
+                  <div class="video-wrap annotated-wrap"><div class="result-subhead"><strong>Annotated output</strong><span>ACTUAL PROCESSED VIDEO</span></div><video id="result-video" controls playsinline></video></div>
+                  <div class="video-wrap original-wrap"><div class="result-subhead"><strong>Original clip</strong><span>REFERENCE</span></div><video id="original-result" controls playsinline></video></div>
+                </div>
+                <div class="event-timeline-wrap"><div class="timeline-heading"><strong>Event timeline</strong><span id="timeline-status">Markers use actual saved event timestamps</span></div><div class="event-timeline" id="event-timeline"><div class="timeline-empty">No event markers for this session.</div></div></div>
+                <div class="result-links"><span id="result-track-summary">Vehicle results are available in Vehicle Tracking.</span><button type="button" data-open-page="tracking">Inspect tracks →</button><button type="button" data-open-page="events">Review events →</button></div>
+              </div>
+            </section>
+            <div class="analysis-underbar"><div><span class="underbar-icon"><svg viewBox="0 0 24 24"><path d="M12 3 22 20H2L12 3Z"/><path d="M12 9v5m0 3h.01"/></svg></span><p><strong>Interpret with care</strong><span>Calibration errors and occlusions affect measurements. Every alert requires human review.</span></p></div><button class="text-button" type="button" data-open-page="events">Open event review →</button></div>
           </div>
-          <div class="pipeline-foot"><span class="foot-pulse"></span><span>Risk flags are screening signals, not collision predictions.</span></div>
+          <aside class="setup-panel surface-card">
+            <div class="setup-title"><div class="step-circle">1</div><div><p class="eyebrow">CONFIGURE SOURCE</p><h2>Analysis settings</h2></div></div>
+            <form id="analysis-form">
+              <div class="mode-switch" role="tablist" aria-label="Analysis source"><button class="mode-option selected" type="button" data-mode="file" role="tab" aria-selected="true">Video file</button><button class="mode-option" type="button" data-mode="camera" role="tab" aria-selected="false">IP camera</button></div>
+              <div id="file-source"><label class="field-label" for="video-file">Traffic video <span>MP4 · MOV · MKV · AVI · WEBM</span></label><label class="dropzone" id="dropzone" for="video-file"><input id="video-file" name="video" type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/x-msvideo,video/webm,.mp4,.mov,.mkv,.avi,.webm" required><span class="dropzone-icon"><svg viewBox="0 0 24 24"><path d="M12 16V4m-5 5 5-5 5 5M4 16v4h16v-4"/></svg></span><strong>Drop a video to begin</strong><small>or browse your device · max 300 MB</small><span class="file-name" id="video-name">No video selected</span></label></div>
+              <div id="camera-source" hidden><label class="field-label" for="stream-url">Camera stream address <span>RTSP / RTSPS</span></label><input class="text-input camera-input" id="stream-url" name="stream_url" type="password" placeholder="Configured URL or rtsp://camera/stream" maxlength="2048" autocomplete="off" spellcheck="false" disabled><p class="field-help">Credentials stay out of event records and logs.</p><div class="duration-row"><label class="field-label" for="duration">Capture duration</label><select class="text-input" id="duration" name="duration_s" disabled><option value="60">1 minute</option><option value="300" selected>5 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">60 minutes</option></select></div></div>
+              <div class="field-block"><label class="field-label" for="calibration-file">Road calibration <span>OPTIONAL JSON</span></label><label class="file-picker"><span class="file-icon"><svg viewBox="0 0 24 24"><path d="M4 20 20 4M5 7l2 2m1-6 2 2m7 11 2 2m-6 1 2 2"/></svg></span><span id="calibration-name">No calibration · speed unavailable</span><input id="calibration-file" name="calibration" type="file" accept=".json,application/json"></label></div>
+              <div class="field-block"><label class="field-label" for="model">Vehicle detector <span>WEIGHTS PATH</span></label><input class="text-input" id="model" name="model" value="{{ model }}" maxlength="240" autocomplete="off"></div>
+              <div class="rule-section"><div class="rule-heading"><strong>Speed rule</strong><span>Optional</span></div><label class="field-label" for="speed-limit">Limit <span>KM/H</span></label><input class="text-input" id="speed-limit" name="speed_limit_kmh" type="number" min="1" max="250" step="1" placeholder="No limit set"><div class="field-row"><label class="field-label stacked" for="speed-tolerance">Tolerance<input class="text-input" id="speed-tolerance" name="speed_tolerance_kmh" type="number" min="0" max="50" step="1" value="0"></label><label class="field-label stacked" for="speed-confirm">Confirm duration<input class="text-input" id="speed-confirm" name="speed_confirmation_s" type="number" min="0" max="30" step="0.1" value="1"></label></div></div>
+              <div class="calibration-note"><span class="note-icon">i</span><p><strong>Speed needs a measured calibration.</strong> Without valid site geometry, detection and tracking continue; speed stays unavailable.</p></div>
+              <button class="button button-primary run-button" id="run-button" type="submit"><span>Start video analysis</span><svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button><div class="inline-error" id="form-error" role="alert"></div><p class="form-security">Processed locally on this device</p>
+            </form>
+          </aside>
         </div>
       </section>
 
-      <section class="panel results-panel" id="results" hidden>
-        <div class="panel-head"><div><div class="panel-kicker">03 / OUTPUT</div><h2>Analysis review</h2></div><div class="job-actions"><button class="stop-button" id="stop-button" type="button" hidden>Stop live analysis</button><span class="job-pill" id="job-status">QUEUED</span></div></div>
-        <div class="job-summary" id="job-summary">Waiting for analysis…</div>
-        <div class="results-grid" id="results-content" hidden>
-          <div class="video-comparison" id="video-comparison">
-            <div class="video-wrap"><div class="result-subhead"><strong>ORIGINAL</strong><span>INPUT VIDEO</span></div><video id="original-result" controls playsinline></video></div>
-            <div class="video-wrap"><div class="result-subhead"><strong>ANNOTATED</strong><span>PROCESSED OUTPUT</span></div><video id="result-video" controls playsinline></video></div>
-          </div>
-          <div class="event-wrap" id="events"><div class="result-subhead"><strong>EVENT REVIEW · HUMAN DECISION REQUIRED</strong><span id="event-count">0 EVENTS</span></div><div class="reviewer-bar"><input id="reviewer-name" class="text-input" type="text" maxlength="120" placeholder="Reviewer name or initials"><span id="review-feedback" role="status"></span></div><div class="event-list" id="event-list"><div class="empty-events">No events have been recorded for this analysis.</div></div></div>
-          <section class="track-section"><div class="track-section-head"><strong>VEHICLE TRACKS</strong><span id="track-count">Waiting for observations</span></div><div class="track-table-wrap"><table><thead><tr><th>TRACK ID</th><th>CLASS</th><th>SPEED</th><th>QUALITY</th><th>OBSERVATIONS</th><th>STATE</th></tr></thead><tbody id="track-table"><tr><td colspan="6" class="empty-track">No track data yet.</td></tr></tbody></table></div></section>
-        </div>
-        <div class="job-error" id="job-error" hidden></div>
+      <section class="page-view" id="page-tracking" data-page="tracking" hidden>
+        <div class="page-heading-row"><div><p class="eyebrow">OBJECT TRACKING</p><h1>Vehicle Tracking</h1><p class="page-lede">Every confirmed supported track from the selected analysis session.</p></div><span class="quality-chip">Session-specific IDs</span></div>
+        <div class="track-summary-strip"><div><span>Tracks observed</span><strong id="track-count">No session selected</strong></div><div><span>Current analysis</span><strong id="tracking-session-name">Choose a saved or current analysis</strong></div></div>
+        <section class="surface-card data-table-card"><div class="table-toolbar"><div><h2>Tracked vehicles</h2><p>IDs identify tracker observations, not unique physical vehicles. Select a row to inspect its measurements.</p></div><input id="track-filter" class="text-input filter-input" type="search" placeholder="Filter by class or track ID"></div><div class="track-table-wrap"><table><thead><tr><th>TRACK ID</th><th>CLASS</th><th>VALID SPEED</th><th>QUALITY</th><th>OBSERVATIONS</th><th>STATUS</th></tr></thead><tbody id="track-table"><tr><td colspan="6" class="empty-track">Run an analysis or select a session to view tracks.</td></tr></tbody></table></div><div class="track-detail" id="track-detail"><span>Select a vehicle row to inspect its track record.</span></div></section>
       </section>
 
-      <section class="panel history-panel" id="history">
-        <div class="panel-head"><div><div class="panel-kicker">04 / DATABASE</div><h2>Recent analyses</h2></div><button class="refresh-button" id="refresh-history" type="button">Refresh</button></div>
-        <div class="history-list" id="history-list"><div class="empty-events">Loading saved analysis sessions…</div></div>
+      <section class="page-view" id="page-helmets" data-page="helmets" hidden>
+        <div class="page-heading-row"><div><p class="eyebrow">RIDER SAFETY RESEARCH</p><h1>Helmet Compliance</h1><p class="page-lede">Helmet-state classification is only available when a compatible custom model and rider association pipeline are validated.</p></div><span class="status-chip status-pending" id="helmet-status-chip">MODEL NOT INTEGRATED</span></div>
+        <div class="helmet-feature"><div class="helmet-graphic"><svg viewBox="0 0 160 130"><path d="M24 83a56 56 0 0 1 112 0v12H24V83Z"/><path d="M80 28v24M37 72h86M51 96v9m58-9v9"/><path d="M64 57 80 41l16 16"/></svg></div><div><p class="eyebrow">NO PREDICTIONS ARE BEING GENERATED</p><h2>Evidence first. Classification second.</h2><p>SAFE-Drive has helmet model training and validation scripts, but it does not yet run helmet inference or associate a helmet state with a specific rider and motorcycle. This page stays empty until that integration exists; no compliance counts are inferred.</p><a class="button button-secondary" href="https://github.com/bhuvzzs24-spec/SAFE-Drive/blob/main/docs/HELMET_MODEL.md" target="_blank" rel="noreferrer">Read the model workflow <span>↗</span></a></div></div>
+        <div class="helmet-class-grid"><article><span class="class-mark green">01</span><h3>Full-face helmet</h3><p>Proposed model class</p></article><article><span class="class-mark amber">02</span><h3>Half-face helmet</h3><p>Proposed model class</p></article><article><span class="class-mark red">03</span><h3>No helmet</h3><p>Proposed model class</p></article><article><span class="class-mark gray">04</span><h3>Uncertain</h3><p>Required review state</p></article></div>
       </section>
 
-      <footer class="disclaimer"><span class="disclaimer-mark">!</span><span><b>Research prototype.</b> Detection, speed, and approach-risk outputs are unvalidated and may be wrong. Review events manually. Do not use for enforcement or decisions about individuals.</span><a href="https://github.com/bhuvzzs24-spec/SAFE-Drive" target="_blank" rel="noreferrer">PROJECT REPO ↗</a></footer>
+      <section class="page-view" id="page-speed" data-page="speed" hidden>
+        <div class="page-heading-row"><div><p class="eyebrow">CALIBRATED MOTION</p><h1>Speed Violations</h1><p class="page-lede">Only confirmed rule events with a valid calibrated estimate appear here.</p></div><span class="status-chip status-amber">HUMAN REVIEW REQUIRED</span></div>
+        <div class="speed-explainer surface-card"><div class="metric-icon red"><svg viewBox="0 0 24 24"><path d="M4 18a9 9 0 1 1 16 0"/><path d="m12 13 4-4M6 18h12"/></svg></div><div><h2>Rules are configured per analysis</h2><p>A speed event requires site calibration, a configured limit and tolerance, and a sustained exceedance. Missing or unreliable speed measurements cannot trigger a violation.</p></div><button class="button button-secondary" type="button" data-open-page="analysis">Configure a rule →</button></div>
+        <section class="surface-card event-page-card"><div class="surface-heading"><div><p class="eyebrow">SAVED SESSION EVENTS</p><h2>Confirmed speed-rule events</h2></div><span class="count-pill" id="speed-event-count">0 events</span></div><div class="event-list" id="speed-event-list"><div class="empty-inline">Select an analysis session to see its saved speed events.</div></div></section>
+      </section>
+
+      <section class="page-view" id="page-events" data-page="events" hidden>
+        <div class="page-heading-row"><div><p class="eyebrow">HUMAN-IN-THE-LOOP</p><h1>Event Review</h1><p class="page-lede">Review actual persisted screening events. Predictions are not determinations of fault or legal violations.</p></div><span class="status-chip status-amber">REVIEW BEFORE USE</span></div>
+        <section class="surface-card event-page-card"><div class="review-toolbar"><div><h2>Session events</h2><p id="event-session-label">Select a current or saved analysis to load events.</p></div><label class="reviewer-field">Reviewer name<input id="reviewer-name" class="text-input" type="text" maxlength="120" placeholder="Name or initials"></label></div><div class="review-feedback" id="review-feedback" role="status"></div><div class="event-list review-event-list" id="event-list"><div class="empty-inline">Events recorded by this session will appear here.</div></div></section>
+      </section>
+
+      <section class="page-view" id="page-analytics" data-page="analytics" hidden>
+        <div class="page-heading-row"><div><p class="eyebrow">MEASURED SESSION DATA</p><h1>Analytics</h1><p class="page-lede">Summaries are calculated from persisted analyses. No placeholder benchmark values are shown.</p></div><span class="quality-chip">SQLite-backed</span></div>
+        <div class="analytics-metrics"><article class="surface-card"><span>Saved sessions</span><strong id="analytics-sessions">—</strong><small>All analysis sources</small></article><article class="surface-card"><span>Processed frames</span><strong id="analytics-frames">—</strong><small>From completed and running jobs</small></article><article class="surface-card"><span>Vehicle tracks</span><strong id="analytics-tracks">—</strong><small>Persisted track summaries</small></article><article class="surface-card"><span>Reviewed events</span><strong id="analytics-reviewed">—</strong><small>Verified or rejected decisions</small></article></div>
+        <section class="surface-card analytics-chart-card"><div class="surface-heading"><div><p class="eyebrow">SESSION HISTORY</p><h2>Processing activity</h2></div><span class="chart-caption">Actual records only</span></div><div id="analytics-chart" class="analytics-chart"><div class="empty-inline">No completed sessions have been recorded yet.</div></div></section>
+      </section>
+
+      <section class="page-view" id="page-cameras" data-page="cameras" hidden>
+        <div class="page-heading-row"><div><p class="eyebrow">VIDEO SOURCES</p><h1>Camera Management</h1><p class="page-lede">Connect supported IP cameras through a reachable RTSP or RTSPS stream.</p></div><span class="quality-chip">No firmware changes</span></div>
+        <section class="camera-management-card surface-card"><div class="camera-device-visual"><svg viewBox="0 0 100 76"><rect x="8" y="11" width="60" height="52" rx="9"/><path d="m68 25 24-13v50L68 49z"/><circle cx="38" cy="37" r="13"/><circle cx="38" cy="37" r="5"/></svg></div><div class="camera-detail"><p class="eyebrow">DEFAULT INPUT SOURCE</p><h2>{{ camera_id or 'No camera configured' }}</h2><div class="connection-row"><i></i><strong>{{ camera_status }}</strong><span>Connection is tested when an analysis starts.</span></div><p>Enter a session stream address or set <code>SAFE_DRIVE_CAMERA_URL</code>. The server does not discover, install software into, or change the firmware of cameras.</p><button class="button button-primary" type="button" data-action="open-camera">Start a camera session <svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button></div></section>
+        <div class="camera-info-grid"><article class="surface-card"><h3>Stream requirements</h3><p>RTSP/RTSPS address reachable from this computer, compatible video codec, and an authorized camera account.</p></article><article class="surface-card"><h3>Calibration</h3><p>Use a fixed camera and measured road-plane reference points before interpreting speed or metric approach distance.</p></article><article class="surface-card"><h3>Privacy</h3><p>Keep credentials private. The session URL is not written into event records or analysis logs.</p></article></div>
+      </section>
+
+      <section class="page-view" id="page-settings" data-page="settings" hidden>
+        <div class="page-heading-row"><div><p class="eyebrow">LOCAL CONFIGURATION</p><h1>Settings</h1><p class="page-lede">Runtime configuration and model availability for this local installation.</p></div></div>
+        <div class="settings-list surface-card"><div class="settings-row"><div><h2>Vehicle detector</h2><p>YOLO weights used for vehicle classes.</p></div><code>{{ model }}</code></div><div class="settings-row"><div><h2>Helmet model</h2><p>Custom helmet-state inference is not integrated.</p></div><span class="status-chip status-pending">UNAVAILABLE</span></div><div class="settings-row"><div><h2>Camera source</h2><p>Default configuration is loaded from local config or environment.</p></div><span class="settings-value">{{ camera_status }}</span></div><div class="settings-row"><div><h2>Database</h2><p>Sessions, tracks, events, and review decisions.</p></div><code>{{ database_label }}</code></div><div class="settings-row"><div><h2>Service scope</h2><p>Local research dashboard with one background analysis worker.</p></div><span class="settings-value">127.0.0.1</span></div></div>
+      </section>
+
+      <footer class="page-footer"><span>SAFE-Drive · Research prototype</span><span>Review all automated signals before interpretation.</span><a href="https://github.com/bhuvzzs24-spec/SAFE-Drive" target="_blank" rel="noreferrer">Project repository ↗</a></footer>
     </main>
   </div>
-  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</div>
+<script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </body>
 </html>

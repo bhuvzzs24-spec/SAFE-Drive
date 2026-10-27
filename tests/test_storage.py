@@ -43,6 +43,23 @@ class SQLiteStoreTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.store.review_event("missing", "verified", "Reviewer")
 
+    def test_analytics_are_aggregated_from_saved_sessions_tracks_and_reviews(self):
+        self.store.insert_event("s1", {"event_id": "evt-analytics", "event_type": "speed_limit_exceeded"})
+        self.store.review_event("evt-analytics", "verified", "Reviewer")
+        summary = {"tracks": [{"track_id": "1", "vehicle_class": "car", "first_seen_s": 0,
+                    "last_seen_s": 1, "bbox_xyxy": [0, 0, 10, 10], "trajectory": [],
+                    "confidence": 0.9, "speed_kmh": 30.0,
+                    "speed_quality": "calibrated_estimate", "observations": 2, "active": False}]}
+        self.store.save_tracks("s1", summary)
+        self.store.update_session("s1", "completed", 12, {"source_ended": False})
+        analytics = self.store.analytics()
+        self.assertEqual(analytics["sessions"], 1)
+        self.assertEqual(analytics["completed_sessions"], 1)
+        self.assertEqual(analytics["frames_processed"], 12)
+        self.assertEqual(analytics["vehicle_tracks"], 1)
+        self.assertEqual(analytics["tracks_with_valid_speed"], 1)
+        self.assertEqual(analytics["reviewed_events"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

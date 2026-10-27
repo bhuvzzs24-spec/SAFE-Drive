@@ -255,3 +255,26 @@ class SQLiteStore:
             track["active"] = bool(track["active"])
             tracks.append(track)
         return tracks
+
+    def analytics(self) -> dict:
+        """Return aggregate counts and dated session activity from persisted rows."""
+        with self._connect() as conn:
+            session = conn.execute("""SELECT COUNT(*) AS sessions,
+                COALESCE(SUM(status='completed'),0) AS completed,
+                COALESCE(SUM(frames_processed),0) AS frames
+                FROM analysis_sessions""").fetchone()
+            tracks = conn.execute("""SELECT COUNT(*) AS tracks,
+                COALESCE(SUM(speed_kmh IS NOT NULL),0) AS valid_speed
+                FROM vehicle_tracks""").fetchone()
+            events = conn.execute("""SELECT COUNT(*) AS events,
+                COALESCE(SUM(review_status='pending'),0) AS pending,
+                COALESCE(SUM(review_status IN ('verified','rejected')),0) AS reviewed
+                FROM violation_events""").fetchone()
+            activity = conn.execute("""SELECT substr(started_at,1,10) AS day, COUNT(*) AS sessions
+                FROM analysis_sessions GROUP BY day ORDER BY day DESC LIMIT 7""").fetchall()
+        return {"sessions": int(session["sessions"]), "completed_sessions": int(session["completed"]),
+                "frames_processed": int(session["frames"]), "vehicle_tracks": int(tracks["tracks"]),
+                "tracks_with_valid_speed": int(tracks["valid_speed"]),
+                "events": int(events["events"]), "pending_events": int(events["pending"]),
+                "reviewed_events": int(events["reviewed"]),
+                "activity": [{"day": row["day"], "sessions": int(row["sessions"])} for row in reversed(activity)]}

@@ -8,11 +8,7 @@ from pathlib import Path
 import threading
 import time
 
-import numpy as np
-
-from .encounters import analyse_pair
 from .events import write_event
-from .geometry import RoadPlane
 from .risk import score_event
 from .rules import SpeedLimitRule, SpeedViolationConfirmer
 from .speed import SpeedEstimator
@@ -32,6 +28,12 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
         from deep_sort_realtime.deepsort_tracker import DeepSort
     except ImportError as exc:
         raise SystemExit("Video mode needs optional dependencies: pip install -e '.[vision]'") from exc
+
+    # Keep dashboard startup independent of the comparatively heavy vision
+    # stack. Load numerical/geometry code only when a video job is submitted.
+    import numpy as np
+    from .encounters import analyse_pair
+    from .geometry import RoadPlane
 
     cal = {}
     plane = None
