@@ -16,8 +16,15 @@
         <span><strong>SAFE<span class="brand-accent">·</span>DRIVE</strong><small>RESEARCH CONSOLE</small></span>
       </a>
       <div class="side-label">WORKSPACE</div>
-      <a class="nav-item active" href="#analysis"><span class="nav-icon">◫</span> Video analysis <span class="nav-dot"></span></a>
-      <a class="nav-item" href="#events"><span class="nav-icon">⌁</span> Event review</a>
+      <button class="nav-item" type="button" data-mode="camera"><span class="nav-icon">◉</span> Live Monitoring <span class="nav-state">RTSP</span></button>
+      <a class="nav-item active" href="#analysis"><span class="nav-icon">▣</span> Video Analysis <span class="nav-dot"></span></a>
+      <a class="nav-item" href="#track-table"><span class="nav-icon">⌖</span> Vehicle Tracking <span class="nav-state">READY</span></a>
+      <button class="nav-item nav-disabled" type="button" disabled><span class="nav-icon">◌</span> Helmet Compliance <span class="nav-state">MODEL MISSING</span></button>
+      <a class="nav-item" href="#events"><span class="nav-icon">↗</span> Speed Violations <span class="nav-state">CONFIGURE</span></a>
+      <a class="nav-item" href="#events"><span class="nav-icon">⌁</span> Event Review <span class="nav-state">SQLITE</span></a>
+      <button class="nav-item nav-disabled" type="button" disabled><span class="nav-icon">▤</span> Analytics <span class="nav-state">PLANNED</span></button>
+      <button class="nav-item" type="button" data-mode="camera"><span class="nav-icon">▧</span> Camera Management <span class="nav-state">RTSP</span></button>
+      <button class="nav-item nav-disabled" type="button" disabled><span class="nav-icon">⚙</span> Settings <span class="nav-state">PLANNED</span></button>
       <div class="sidebar-bottom">
         <div class="local-card"><span class="local-led"></span><span><b>LOCAL SESSION</b><small>Footage stays on this device</small></span></div>
         <div class="version">SAFE-DRIVE <span>v0.3.0</span></div>
@@ -45,6 +52,7 @@
                 <input id="video-file" name="video" type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/x-msvideo,video/webm,.mp4,.mov,.mkv,.avi,.webm" required>
                 <span class="upload-glyph">↑</span><strong>Choose a video to analyze</strong><small>or drop a file here · max 300 MB</small><span class="file-name" id="video-name">No video selected</span>
               </label>
+              <video class="source-preview" id="source-preview" controls playsinline hidden></video>
             </div>
             <div id="camera-source" hidden>
               <label class="field-label" for="stream-url">Camera stream address <span>RTSP / RTSPS</span></label>
@@ -53,10 +61,15 @@
               <div class="duration-row"><label class="field-label" for="duration">Capture duration</label><select class="text-input" id="duration" name="duration_s" disabled><option value="60">1 minute</option><option value="300" selected>5 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">60 minutes</option></select></div>
             </div>
             <div class="field-row">
-              <div class="field-block"><label class="field-label" for="calibration-file">Camera calibration <span>JSON</span></label><label class="file-picker"><span class="file-icon">⌗</span><span id="calibration-name">Select site calibration…</span><input id="calibration-file" name="calibration" type="file" accept=".json,application/json" required></label></div>
+              <div class="field-block"><label class="field-label" for="calibration-file">Camera calibration <span>OPTIONAL JSON</span></label><label class="file-picker"><span class="file-icon">⌗</span><span id="calibration-name">No calibration · speed unavailable</span><input id="calibration-file" name="calibration" type="file" accept=".json,application/json"></label></div>
               <div class="field-block"><label class="field-label" for="model">Detector weights <span>LOCAL PATH</span></label><input class="text-input" id="model" name="model" value="{{ model }}" maxlength="240" autocomplete="off"></div>
             </div>
-            <div class="calibration-note"><span>i</span><div><b>Calibration is required for metric speed.</b> Use measured road-plane correspondences for this fixed camera. The example file is not a valid site calibration.</div></div>
+            <div class="field-row rule-row">
+              <div class="field-block"><label class="field-label" for="speed-limit">Speed limit <span>OPTIONAL · km/h</span></label><input class="text-input" id="speed-limit" name="speed_limit_kmh" type="number" min="1" max="250" step="1" placeholder="Disabled"></div>
+              <div class="field-block"><label class="field-label" for="speed-tolerance">Tolerance <span>km/h</span></label><input class="text-input" id="speed-tolerance" name="speed_tolerance_kmh" type="number" min="0" max="50" step="1" value="0"></div>
+              <div class="field-block"><label class="field-label" for="speed-confirm">Confirm for <span>SECONDS</span></label><input class="text-input" id="speed-confirm" name="speed_confirmation_s" type="number" min="0" max="30" step="0.1" value="1"></div>
+            </div>
+            <div class="calibration-note"><span>i</span><div><b>Calibration enables metric speed and TTC.</b> Without valid site calibration, object detection and tracking continue and speed is shown as unavailable. Example points are placeholders.</div></div>
             <button class="primary-button" id="run-button" type="submit"><span class="button-icon">▷</span><span>Run video analysis</span><span class="button-arrow">↗</span></button>
             <div class="form-foot"><span class="lock-icon">◇</span> Processed on this computer · stream URL is not logged</div>
             <div class="inline-error" id="form-error" role="alert"></div>
@@ -82,10 +95,19 @@
         <div class="panel-head"><div><div class="panel-kicker">03 / OUTPUT</div><h2>Analysis review</h2></div><div class="job-actions"><button class="stop-button" id="stop-button" type="button" hidden>Stop live analysis</button><span class="job-pill" id="job-status">QUEUED</span></div></div>
         <div class="job-summary" id="job-summary">Waiting for analysis…</div>
         <div class="results-grid" id="results-content" hidden>
-          <div class="video-wrap"><div class="result-subhead"><strong>ANNOTATED VIDEO</strong><span>LOCAL RESULT</span></div><video id="result-video" controls playsinline></video></div>
-          <div class="event-wrap" id="events"><div class="result-subhead"><strong>EVENT LOG</strong><span id="event-count">0 EVENTS</span></div><div class="event-list" id="event-list"><div class="empty-events">No approach-risk events were logged for this clip.</div></div></div>
+          <div class="video-comparison" id="video-comparison">
+            <div class="video-wrap"><div class="result-subhead"><strong>ORIGINAL</strong><span>INPUT VIDEO</span></div><video id="original-result" controls playsinline></video></div>
+            <div class="video-wrap"><div class="result-subhead"><strong>ANNOTATED</strong><span>PROCESSED OUTPUT</span></div><video id="result-video" controls playsinline></video></div>
+          </div>
+          <div class="event-wrap" id="events"><div class="result-subhead"><strong>EVENT REVIEW · HUMAN DECISION REQUIRED</strong><span id="event-count">0 EVENTS</span></div><div class="reviewer-bar"><input id="reviewer-name" class="text-input" type="text" maxlength="120" placeholder="Reviewer name or initials"><span id="review-feedback" role="status"></span></div><div class="event-list" id="event-list"><div class="empty-events">No events have been recorded for this analysis.</div></div></div>
+          <section class="track-section"><div class="track-section-head"><strong>VEHICLE TRACKS</strong><span id="track-count">Waiting for observations</span></div><div class="track-table-wrap"><table><thead><tr><th>TRACK ID</th><th>CLASS</th><th>SPEED</th><th>QUALITY</th><th>OBSERVATIONS</th><th>STATE</th></tr></thead><tbody id="track-table"><tr><td colspan="6" class="empty-track">No track data yet.</td></tr></tbody></table></div></section>
         </div>
         <div class="job-error" id="job-error" hidden></div>
+      </section>
+
+      <section class="panel history-panel" id="history">
+        <div class="panel-head"><div><div class="panel-kicker">04 / DATABASE</div><h2>Recent analyses</h2></div><button class="refresh-button" id="refresh-history" type="button">Refresh</button></div>
+        <div class="history-list" id="history-list"><div class="empty-events">Loading saved analysis sessions…</div></div>
       </section>
 
       <footer class="disclaimer"><span class="disclaimer-mark">!</span><span><b>Research prototype.</b> Detection, speed, and approach-risk outputs are unvalidated and may be wrong. Review events manually. Do not use for enforcement or decisions about individuals.</span><a href="https://github.com/bhuvzzs24-spec/SAFE-Drive" target="_blank" rel="noreferrer">PROJECT REPO ↗</a></footer>

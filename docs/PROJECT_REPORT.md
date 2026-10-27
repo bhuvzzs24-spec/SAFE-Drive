@@ -17,6 +17,21 @@ Traffic video can support retrospective analysis of vehicle movement and conflic
 
 ## Current system
 
+```mermaid
+flowchart LR
+    A[Uploaded video or RTSP stream] --> B[Flask local dashboard]
+    B --> C[YOLO vehicle detector]
+    C --> D[DeepSORT per-session tracks]
+    D --> E[Optional road-plane calibration]
+    E --> F[Smoothed speed and pairwise approach screening]
+    F --> G[Temporal speed rules and JSONL events]
+    D --> H[SQLite session and track summaries]
+    G --> I[SQLite event review]
+    H --> J[Dashboard history and results]
+    I --> J
+    F --> K[Annotated MP4 stored locally]
+```
+
 ### Processing path
 
 1. The operator selects an offline video or bounded RTSP/RTSPS camera session, plus site calibration and detector weights, in the local dashboard.
@@ -27,7 +42,7 @@ Traffic video can support retrospective analysis of vehicle movement and conflic
 6. Elevated and high screening events are annotated in the output clip and appended to JSONL with review metadata.
 7. The dashboard presents the annotated video and a readable event list.
 
-The dashboard stores uploaded clips, calibration files, and outputs locally under `local_data/`; that path is git-ignored. A live camera address is passed to the worker for the session and omitted from event records and error logs. The web server binds to loopback. Job status currently lives in memory and is lost when the process restarts.
+The dashboard stores uploaded clips, calibration files, and outputs locally under `local_data/`; that path is git-ignored. Sessions, per-track summaries, events and reviewer decisions persist in SQLite. A live camera address is passed to the worker for the session and omitted from event records and error logs. The web server binds to loopback. Live job progress is in memory and resets on restart.
 
 ### Repository components
 
@@ -41,13 +56,16 @@ The dashboard stores uploaded clips, calibration files, and outputs locally unde
 | `src/safe_drive/events.py` | Append-only JSONL event writer and content-addressed event ID |
 | `src/safe_drive/cli.py` | Optional video-file and RTSP detector/tracker processing path |
 | `src/safe_drive/camera_input.py` | Demo/video/webcam/RTSP configuration normalization and explicit fallback state |
+| `src/safe_drive/tracking.py` | Independent per-track measurements, trajectory history, and expiration |
+| `src/safe_drive/rules.py` | Time-confirmed configured speed-limit events and per-track cooldown |
+| `src/safe_drive/storage.py` | SQLite camera/session/track/event schema and reviewer decisions |
 | `config/calibration.example.json` | Example calibration file structure; values are placeholders only |
 | `docs/RESEARCH_PLAN.md` | Proposed research question, split plan, baselines, and metrics |
 | `legacy/` | Unmodified starter scripts retained for comparison, with known limitations documented |
 
 ## User interface
 
-The interface is a dark, responsive research console with offline-video and live-camera modes, calibration and detector selection, queued/running/completed/failed status, stop control, live event updates, annotated-video playback, and a pairwise event list. It emphasizes local processing and human review. The dashboard is a local research tool, not a multi-user hosted product; it has no account system, durable job database, ONVIF discovery, or production deployment setup.
+The interface is a dark, responsive research console with source selection, original-video preview, calibration and detector selection, optional speed policy, queued/running/completed/failed status, stop control, live track/event updates, original versus annotated playback, vehicle-track table, and persistent human review actions. It emphasizes local processing and human review. The dashboard is a local research tool, not a multi-user hosted product; it has no account system, durable job database, ONVIF discovery, or production deployment setup.
 
 ## Research direction
 
@@ -63,7 +81,7 @@ The contribution should be judged against a current literature review rather tha
 - Speed estimates are not validated against radar or surveyed ground truth in this repository.
 - The currently used risk thresholds are illustrative and are not probabilities, legal standards, or fines.
 - There is no supplied dataset, trained helmet detector, human-subject outcome study, benchmark table, or model card.
-- Dashboard job state is memory-only; interrupted jobs must be resubmitted.
+- Transient dashboard job state is memory-only; persisted SQLite session, track, event and review records remain after restart, while interrupted jobs must be resubmitted.
 - Live-camera support requires a reachable RTSP/RTSPS endpoint and compatible local OpenCV transport/codec support; camera discovery and automatic reconnect are not implemented.
 - Frames are processed sequentially, with no guaranteed real-time throughput or annotated live preview; the recording is available after the session ends or is stopped.
 - No accuracy, safety benefit, novelty, or publication acceptance claim is established.
@@ -83,4 +101,4 @@ Use only footage with appropriate permission. Keep source footage and generated 
 
 ## Reproducibility and execution
 
-Install with `python -m pip install -e '.[vision,web]'`, create a site-specific calibration file, then launch `python app.py` and open `http://127.0.0.1:5170`. The pretrained detector weights may be downloaded on first use; record the precise weight file, its hash, library versions, calibration file, and full run settings for every experiment. This update adds RTSP/RTSPS camera sessions, a dashboard, and a report, but does not claim benchmark validation. Live camera mode connects to a stream; it does not install the application into camera firmware.
+Install with `python -m pip install -e '.[vision]'`, create a site-specific calibration file, then launch `python app.py` and open `http://127.0.0.1:5170`. The pretrained detector weights may be downloaded on first use; record the precise weight file, its hash, library versions, calibration file, and full run settings for every experiment. The app installs Flask as a base dependency so the dashboard is available with the standard project install. This iteration adds optional calibration, per-track summaries/trails, configured temporal speed events, SQLite persistence and review, plus RTSP sessions. It does not claim benchmark validation. Live camera mode connects to a stream; it does not install the application into camera firmware.

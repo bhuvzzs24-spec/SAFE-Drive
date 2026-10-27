@@ -18,6 +18,8 @@ from werkzeug.utils import secure_filename
 from safe_drive.cli import run_video
 from safe_drive.camera_input import CameraConfigurationError, load_camera_source, resolve_camera_source
 from safe_drive.geometry import RoadPlane
+from safe_drive.rules import SpeedLimitRule
+from safe_drive.storage import SQLiteStore
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("SAFE_DRIVE_DATA", ROOT / "local_data")).resolve()
@@ -27,6 +29,7 @@ JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
 WORKERS = ThreadPoolExecutor(max_workers=1, thread_name_prefix="safe-drive")
 CAMERA_CONFIG = Path(os.environ.get("SAFE_DRIVE_CAMERA_CONFIG", ROOT / "config/camera.json"))
+STORE = SQLiteStore(os.environ.get("SAFE_DRIVE_DATABASE", DATA / "safe_drive.sqlite3"))
 
 
 def create_app() -> Flask:
@@ -78,25 +81,37 @@ def create_app() -> Flask:
             abort(404)
         return job
 
-    def analyze(job_id: str, source: Path | str, calibration_path: Path, model: str,
-                stop_event: threading.Event, duration_s: int | None, source_label: str) -> None:
+    def analyze(job_id: str, source: Path | str, calibration_path: Path | None, model: str,
+                stop_event: threading.Event, duration_s: int | None, source_label: str,
+                speed_rule: SpeedLimitRule) -> None:
         with JOBS_LOCK:
             if stop_event.is_set():
                 JOBS[job_id]["status"] = "cancelled"
+                STORE.update_session(job_id, "cancelled")
                 return
             JOBS[job_id].update(status="running", output=str(DATA / job_id / "annotated.mp4"),
                                 events=str(DATA / job_id / "events.jsonl"))
+        STORE.update_session(job_id, "running")
         folder = DATA / job_id
         output_video = folder / "annotated.mp4"
         events_path = folder / "events.jsonl"
         try:
             result = run_video(source, calibration_path, model, output_video, events_path,
                                0.35, stop_event, duration_s, source_label,
-                               lambda frames, elapsed: update_progress(job_id, frames, elapsed))
+                               lambda frames, elapsed, tracks: update_progress(job_id, frames, elapsed, tracks),
+                               speed_rule,
+                               lambda event: STORE.insert_event(job_id, event))
             with JOBS_LOCK:
                 warning = "Camera stream ended before the requested duration." if result["source_ended"] else None
                 JOBS[job_id].update(status="completed", output=str(output_video), events=str(events_path),
-                                    frames_processed=result["frames_processed"], warning=warning)
+                                    frames_processed=result["frames_processed"], warning=warning,
+                                    tracks=result["tracks"],
+                                    calibration_status=result["calibration_status"],
+                                    calibration_message=result["calibration_message"])
+            STORE.save_tracks(job_id, result["tracks"])
+            STORE.update_session(job_id, "completed", result["frames_processed"],
+                                 {k: v for k, v in result.items() if k != "tracks"},
+                                 calibration_status=result["calibration_status"])
         except (Exception, SystemExit) as exc:  # includes clear errors from missing optional modules
             if isinstance(source, str) and source.lower().startswith(("rtsp://", "rtsps://")):
                 # Avoid writing camera credentials embedded in a URL to logs or the UI.
@@ -107,43 +122,76 @@ def create_app() -> Flask:
                 message = f"{type(exc).__name__}: {exc}"
             with JOBS_LOCK:
                 JOBS[job_id].update(status="failed", error=message)
+            STORE.update_session(job_id, "failed", error_message=message)
 
-    def update_progress(job_id: str, frames: int, elapsed: float) -> None:
+    def update_progress(job_id: str, frames: int, elapsed: float, tracks: dict) -> None:
         with JOBS_LOCK:
             if job_id in JOBS:
-                JOBS[job_id].update(frames_processed=frames, elapsed_s=elapsed)
+                JOBS[job_id].update(frames_processed=frames, elapsed_s=elapsed, tracks=tracks)
+        STORE.save_tracks(job_id, tracks)
+        STORE.update_session(job_id, "running", frames, tracks)
+
+    def save_optional_calibration(upload, folder: Path) -> tuple[Path | None, str]:
+        if not upload or not upload.filename:
+            return None, "missing"
+        try:
+            calibration = json.load(upload.stream)
+            plane = RoadPlane(calibration["image_points_px"], calibration["road_points_m"])
+            plane.transform(plane.image_points)
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            return None, "invalid"
+        path = folder / "calibration.json"
+        path.write_text(json.dumps(calibration, indent=2), encoding="utf-8")
+        return path, "configured"
+
+    def parse_speed_rule(form) -> SpeedLimitRule:
+        raw_limit = form.get("speed_limit_kmh", "").strip()
+        limit = float(raw_limit) if raw_limit else None
+        tolerance = float(form.get("speed_tolerance_kmh", "0") or 0)
+        confirmation = float(form.get("speed_confirmation_s", "1") or 1)
+        return SpeedLimitRule(limit, tolerance, confirmation)
 
     @app.post("/api/jobs")
     def create_job():
         upload = request.files.get("video")
         calibration_upload = request.files.get("calibration")
-        if not upload or not upload.filename or not calibration_upload or not calibration_upload.filename:
-            return jsonify(error="Choose both a traffic video and a calibration JSON file."), 400
+        if not upload or not upload.filename:
+            return jsonify(error="Choose a traffic video file."), 400
         safe_name = secure_filename(upload.filename)
         extension = safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else ""
         if extension not in ALLOWED_VIDEO:
             return jsonify(error=f"Unsupported video type. Use: {', '.join(sorted(ALLOWED_VIDEO))}."), 400
-        try:
-            calibration = json.load(calibration_upload.stream)
-            RoadPlane(calibration["image_points_px"], calibration["road_points_m"])
-        except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
-            return jsonify(error=f"Calibration JSON is invalid: {exc}"), 400
+        # Calibration is optional: detector/tracker output remains useful for
+        # counts and trajectories, while metric speed is explicitly unavailable.
         model = request.form.get("model", "yolov8n.pt").strip()
         if not model or len(model) > 240:
             return jsonify(error="Enter a valid model filename or local model path."), 400
+        try:
+            speed_rule = parse_speed_rule(request.form)
+        except (ValueError, TypeError) as exc:
+            return jsonify(error=f"Speed rule is invalid: {exc}"), 400
         job_id = uuid.uuid4().hex
         folder = DATA / job_id
         folder.mkdir(parents=True, exist_ok=False)
         video_path = folder / f"input.{extension}"
-        calibration_path = folder / "calibration.json"
+        calibration_path, calibration_status = save_optional_calibration(calibration_upload, folder)
         upload.save(video_path)
-        calibration_path.write_text(json.dumps(calibration, indent=2), encoding="utf-8")
         stop_event = threading.Event()
+        camera_id = "uploaded-video"
+        if calibration_path:
+            try:
+                camera_id = json.loads(calibration_path.read_text(encoding="utf-8")).get("camera_id") or camera_id
+            except (OSError, json.JSONDecodeError):
+                pass
+        STORE.create_session(job_id, str(camera_id), "uploaded_video", safe_name, model, calibration_status)
         with JOBS_LOCK:
             JOBS[job_id] = {"id": job_id, "name": safe_name, "status": "queued", "model": model,
                             "source_mode": "uploaded_video",
+                            "calibration_status": calibration_status,
+                            "speed_limit_kmh": speed_rule.limit_kmh,
                             "stop_event": stop_event}
-        WORKERS.submit(analyze, job_id, video_path, calibration_path, model, stop_event, None, safe_name)
+        WORKERS.submit(analyze, job_id, video_path, calibration_path, model, stop_event,
+                       None, safe_name, speed_rule)
         return jsonify(id=job_id, status="queued"), 202
 
     @app.post("/api/camera-jobs")
@@ -166,13 +214,6 @@ def create_app() -> Flask:
             return jsonify(error="Camera stream URL is too long."), 400
         stream_url = str(configured_source.source)
         calibration_upload = request.files.get("calibration")
-        if not calibration_upload or not calibration_upload.filename:
-            return jsonify(error="Choose the calibration JSON for this camera."), 400
-        try:
-            calibration = json.load(calibration_upload.stream)
-            RoadPlane(calibration["image_points_px"], calibration["road_points_m"])
-        except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
-            return jsonify(error=f"Calibration JSON is invalid: {exc}"), 400
         try:
             duration_s = int(request.form.get("duration_s", "300"))
         except ValueError:
@@ -182,18 +223,30 @@ def create_app() -> Flask:
         model = request.form.get("model", "yolov8n.pt").strip()
         if not model or len(model) > 240:
             return jsonify(error="Enter a valid model filename or local model path."), 400
+        try:
+            speed_rule = parse_speed_rule(request.form)
+        except (ValueError, TypeError) as exc:
+            return jsonify(error=f"Speed rule is invalid: {exc}"), 400
         job_id = uuid.uuid4().hex
         folder = DATA / job_id
         folder.mkdir(parents=True, exist_ok=False)
-        calibration_path = folder / "calibration.json"
-        calibration_path.write_text(json.dumps(calibration, indent=2), encoding="utf-8")
+        calibration_path, calibration_status = save_optional_calibration(calibration_upload, folder)
+        calibration = {}
+        if calibration_path:
+            try:
+                calibration = json.loads(calibration_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                pass
         stop_event = threading.Event()
         camera_label = str(calibration.get("camera_id") or configured_source.camera_id)[:80]
+        STORE.create_session(job_id, camera_label, "rtsp", camera_label, model, calibration_status)
         with JOBS_LOCK:
             JOBS[job_id] = {"id": job_id, "name": camera_label, "status": "queued", "model": model,
-                            "source_mode": "rtsp", "stop_event": stop_event, "live": True}
+                            "source_mode": "rtsp", "stop_event": stop_event, "live": True,
+                            "calibration_status": calibration_status,
+                            "speed_limit_kmh": speed_rule.limit_kmh}
         WORKERS.submit(analyze, job_id, stream_url, calibration_path, model,
-                       stop_event, duration_s, camera_label)
+                       stop_event, duration_s, camera_label, speed_rule)
         return jsonify(id=job_id, status="queued"), 202
 
     @app.get("/api/jobs/<job_id>")
@@ -228,6 +281,9 @@ def create_app() -> Flask:
             return jsonify(events=[], error=job.get("error")), 200
         if job["status"] not in {"running", "stopping", "completed"} or "events" not in job:
             return jsonify(events=[]), 200
+        persisted = STORE.list_events(job_id)
+        if persisted:
+            return jsonify(events=persisted)
         events_file = Path(job["events"])
         events = []
         if events_file.exists():
@@ -237,6 +293,60 @@ def create_app() -> Flask:
                 except json.JSONDecodeError:
                     continue
         return jsonify(events=events)
+
+    @app.get("/api/sessions")
+    def get_sessions():
+        return jsonify(sessions=STORE.list_sessions())
+
+    def session_or_404(session_id: str) -> dict:
+        if not JOB_ID.fullmatch(session_id):
+            abort(404)
+        record = STORE.get_session(session_id)
+        if not record:
+            abort(404)
+        return record
+
+    @app.get("/api/sessions/<session_id>/events")
+    def get_session_events(session_id: str):
+        session_or_404(session_id)
+        return jsonify(events=STORE.list_events(session_id))
+
+    @app.get("/api/sessions/<session_id>/tracks")
+    def get_session_tracks(session_id: str):
+        session_or_404(session_id)
+        return jsonify(tracks=STORE.list_tracks(session_id))
+
+    @app.get("/api/sessions/<session_id>/video")
+    def get_session_video(session_id: str):
+        record = session_or_404(session_id)
+        if record["status"] != "completed":
+            abort(404)
+        target = DATA / session_id / "annotated.mp4"
+        if not target.is_file():
+            abort(404)
+        return send_file(target, mimetype="video/mp4", conditional=True)
+
+    @app.get("/api/sessions/<session_id>/original")
+    def get_session_original(session_id: str):
+        record = session_or_404(session_id)
+        if record["source_mode"] != "uploaded_video":
+            abort(404)
+        folder = DATA / session_id
+        matches = [p for p in folder.glob("input.*") if p.is_file()]
+        if not matches:
+            abort(404)
+        return send_file(matches[0], conditional=True)
+
+    @app.post("/api/events/<event_id>/review")
+    def review_event(event_id: str):
+        payload = request.get_json(silent=True) or {}
+        try:
+            STORE.review_event(event_id, payload.get("decision", ""), payload.get("reviewer", ""))
+        except KeyError:
+            return jsonify(error="Event not found."), 404
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        return jsonify(event_id=event_id, review_status=payload["decision"]), 200
 
     @app.errorhandler(413)
     def too_large(_error):

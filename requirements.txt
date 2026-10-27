@@ -1,6 +1,7 @@
 # Core research analysis
 numpy>=1.24
 PyYAML>=6.0
+Flask>=3.0
 
 # Optional video pipeline: pip install -e '.[vision]'
 # opencv-python>=4.8
@@ -10,5 +11,4 @@ PyYAML>=6.0
 # Optional OCR (disabled by default): pip install -e '.[ocr]'
 # easyocr>=1.7
 
-# Optional local dashboard: pip install -e '.[web]'
-# Flask>=3.0
+# Optional local dashboard dependencies are included in the base installation.

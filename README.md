@@ -19,8 +19,8 @@ The starter code in `detector.py`, `main.py`, `near_miss.py`, `plate_reader.py`,
 ```bash
 python -m venv .venv
 source .venv/bin/activate       # Windows: .venv\\Scripts\\activate
-python -m pip install -e .
-python -m pip install -e '.[vision,web]'  # video detector and local dashboard
+python -m pip install -e .                 # local dashboard and core analysis
+python -m pip install -e '.[vision]'        # video detector/tracker pipeline
 ```
 
 The first model run may download pretrained weights. Pin the exact model file and its SHA-256 in any experiment record. A pretrained general-object model does not detect helmet violations unless a validated helmet model is separately trained and supplied.
@@ -37,21 +37,21 @@ safe-drive video \
   --events outputs/events.jsonl
 ```
 
-The runner writes annotated video and pairwise approach-risk screening events. Its input can be a local file or an RTSP/RTSPS URL; add `--duration-sec 300` to bound a live session. It does not read plates, infer helmet status, or issue fines. Track IDs are temporary within one clip. Review every event and validate calibration before interpreting the reported km/h values.
+The runner writes annotated video, per-track summaries and screening events. It processes local video or RTSP/RTSPS input; add `--duration-sec 300` to bound a live session. Calibration is optional: without valid measured calibration, detection/tracking continues and speed/TTC remain unavailable. A speed-limit event rule is disabled by default; set `--speed-limit-kmh`, `--speed-tolerance-kmh` and `--speed-confirmation-sec` to configure a demonstration rule. It does not read plates, infer helmet status, or issue fines. Track IDs are temporary within one analysis session. Review every event and validate calibration before interpreting km/h values.
 
 ## Local review dashboard
 
-Install the `vision` and `web` extras, then run:
+Install the `vision` extra, then run:
 
 ```bash
 python app.py
 ```
 
-Open `http://127.0.0.1:5170`. Choose **Video file** to upload a clip, or **Live IP camera** to enter an RTSP/RTSPS stream address and select a bounded capture duration. Both modes require a site-specific calibration JSON. For live sessions, the event list updates as alerts appear; the annotated recording is available when the session ends or is stopped. Jobs run one at a time in a local background worker. Job status is held in memory and resets when the server restarts; uploaded clips and results are stored under ignored `local_data/`. Camera stream addresses are passed to the worker for the session and omitted from event records and error logs. The server binds to loopback and is intended for local research use only. Do not expose it to a network.
+Open `http://127.0.0.1:5170`. Choose **Video file** to upload a clip, or **Live IP camera** to enter an RTSP/RTSPS stream address and select a bounded capture duration. Calibration JSON is optional; without valid calibration, detections and tracks still run while speed is clearly unavailable. You can set an optional per-analysis speed limit, tolerance and minimum exceedance duration; blank limit disables speed events. For live sessions, the event list updates as alerts appear; the annotated recording is available when the session ends or is stopped. Jobs run one at a time in a local background worker. Transient job status is held in memory, while sessions, track summaries, events and review decisions persist in SQLite at `local_data/safe_drive.sqlite3`; uploaded clips and results remain as files under ignored `local_data/`. Camera stream addresses are passed to the worker for the session and omitted from event records and error logs. The server binds to loopback and is intended for local research use only. Do not expose it to a network.
 
 Live mode connects to the camera; it does not install software into camera firmware. The camera must expose an RTSP/RTSPS stream reachable from this computer, and OpenCV must support its transport and codec. This version has no ONVIF discovery or automatic reconnection and cannot guarantee real-time throughput on every computer. Some consumer cameras do not provide RTSP; check the camera or NVR settings.
 
-If no camera is configured, the dashboard explicitly reports **Demo / Upload Mode**. To configure a default source, copy `config/camera.example.json` to the ignored `config/camera.json`, then set its `mode` and source fields. Environment variables override the JSON config: `SAFE_DRIVE_CAMERA_URL`, `SAFE_DRIVE_CAMERA_ID`, and `SAFE_DRIVE_CAMERA_MODE`. `SAFE_DRIVE_CAMERA_URL` takes priority for RTSP. Copy `.env.example` for reference; the app does not automatically load `.env`, so export values in the shell before launching. Never commit camera credentials. The current runner supports upload and RTSP capture; webcam parsing is present but webcam capture wiring is a later stage.
+If no camera is configured, the dashboard explicitly reports **Demo / Upload Mode**. To configure a default source, copy `config/camera.example.json` to the ignored `config/camera.json`, then set its `mode` and source fields. Environment variables override the JSON config: `SAFE_DRIVE_CAMERA_URL`, `SAFE_DRIVE_CAMERA_ID`, and `SAFE_DRIVE_CAMERA_MODE`. `SAFE_DRIVE_CAMERA_URL` takes priority for RTSP. Copy `.env.example` for reference; the app does not automatically load `.env`, so export values in the shell before launching. Never commit camera credentials. The current runner supports upload and RTSP capture; webcam parsing is present but webcam capture wiring is a later stage. Review actions require reviewer name/initials and are stored as verified or rejected decisions; they do not issue penalties.
 
 ## Calibration comes before speed claims
 
@@ -76,7 +76,9 @@ See [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) for a paper-ready experimen
 
 See [`docs/PROJECT_REPORT.md`](docs/PROJECT_REPORT.md) for the current project report, implementation inventory, architecture, limits, and next research milestones.
 
-Run the implemented input-configuration tests with `PYTHONPATH=src python -m unittest discover -s tests -v`. The broader vision/event test suite is still pending.
+See [`docs/HELMET_MODEL.md`](docs/HELMET_MODEL.md) for the custom helmet-state dataset, training and validation workflow. No helmet weights or data are bundled, and helmet-to-rider association/inference remains unimplemented.
+
+Run the tests with `python -m unittest discover -s tests -v`. The tests cover camera configuration, geometry, speed estimation, temporal speed rules, track registry behavior, and SQLite event/session persistence. End-to-end CV evaluation still requires representative labeled footage and independent ground truth.
 
 ## License and data
 
