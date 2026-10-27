@@ -6,6 +6,7 @@ build/
 dist/
 .DS_Store
 outputs/
+local_data/
 *.mp4
 *.avi
 *.db

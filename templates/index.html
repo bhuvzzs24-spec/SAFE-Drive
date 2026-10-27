@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <meta name="theme-color" content="#0a0e12">
+  <title>SAFE-Drive | Research Console</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="SAFE-Drive home">
+        <span class="brand-mark"><span></span><span></span><span></span></span>
+        <span><strong>SAFE<span class="brand-accent">·</span>DRIVE</strong><small>RESEARCH CONSOLE</small></span>
+      </a>
+      <div class="side-label">WORKSPACE</div>
+      <a class="nav-item active" href="#analysis"><span class="nav-icon">◫</span> Video analysis <span class="nav-dot"></span></a>
+      <a class="nav-item" href="#events"><span class="nav-icon">⌁</span> Event review</a>
+      <div class="sidebar-bottom">
+        <div class="local-card"><span class="local-led"></span><span><b>LOCAL SESSION</b><small>Footage stays on this device</small></span></div>
+        <div class="version">SAFE-DRIVE <span>v0.3.0</span></div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar"><div class="breadcrumb">Research <span>/</span> Video analysis</div><div class="top-right"><span class="system-status"><i></i> SYSTEM READY</span><span class="avatar">SD</span></div></header>
+      <section class="page-heading" id="analysis">
+        <div><div class="eyebrow"><span class="eyebrow-line"></span> TRAFFIC SAFETY LAB <span class="eyebrow-tag">EXPERIMENTAL</span></div><h1>Video analysis</h1><p>Screen calibrated traffic footage for vehicle motion and pairwise approach risk.</p></div>
+        <div class="heading-meta"><span class="meta-label">PIPELINE</span><strong>DETECT <b>→</b> TRACK <b>→</b> ANALYZE</strong><small>Human review required for every alert</small></div>
+      </section>
+
+      <section class="workspace-grid">
+        <div class="panel upload-panel">
+          <div class="panel-head"><div><div class="panel-kicker">01 / INPUT</div><h2>New analysis</h2></div><span class="step-badge">VIDEO + CALIBRATION</span></div>
+          <form id="analysis-form">
+            <label class="field-label" for="video-file">Traffic video <span>MP4 · MOV · MKV · AVI · WEBM</span></label>
+            <label class="dropzone" id="dropzone" for="video-file">
+              <input id="video-file" name="video" type="file" accept="video/mp4,video/quicktime,video/x-matroska,video/x-msvideo,video/webm,.mp4,.mov,.mkv,.avi,.webm" required>
+              <span class="upload-glyph">↑</span><strong>Choose a video to analyze</strong><small>or drop a file here · max 300 MB</small><span class="file-name" id="video-name">No video selected</span>
+            </label>
+            <div class="field-row">
+              <div class="field-block"><label class="field-label" for="calibration-file">Camera calibration <span>JSON</span></label><label class="file-picker"><span class="file-icon">⌗</span><span id="calibration-name">Select site calibration…</span><input id="calibration-file" name="calibration" type="file" accept=".json,application/json" required></label></div>
+              <div class="field-block"><label class="field-label" for="model">Detector weights <span>LOCAL PATH</span></label><input class="text-input" id="model" name="model" value="{{ model }}" maxlength="240" autocomplete="off"></div>
+            </div>
+            <div class="calibration-note"><span>i</span><div><b>Calibration is required for metric speed.</b> Use measured road-plane correspondences for this fixed camera. The example file is not a valid site calibration.</div></div>
+            <button class="primary-button" id="run-button" type="submit"><span class="button-icon">▷</span><span>Run video analysis</span><span class="button-arrow">↗</span></button>
+            <div class="form-foot"><span class="lock-icon">◇</span> Processed locally · no cloud upload</div>
+            <div class="inline-error" id="form-error" role="alert"></div>
+          </form>
+        </div>
+
+        <div class="panel pipeline-panel">
+          <div class="panel-head"><div><div class="panel-kicker">02 / METHOD</div><h2>Analysis pipeline</h2></div><span class="live-badge"><i></i> READY</span></div>
+          <div class="pipeline-list">
+            <div class="pipeline-step"><span class="step-icon detector-icon">▦</span><div><strong>Vehicle detection</strong><small>YOLO · vehicle classes</small></div><span class="step-state">ACTIVE</span></div>
+            <div class="pipeline-connector"></div>
+            <div class="pipeline-step"><span class="step-icon tracking-icon">⌖</span><div><strong>Track association</strong><small>DeepSORT · persistent IDs</small></div><span class="step-state">ACTIVE</span></div>
+            <div class="pipeline-connector"></div>
+            <div class="pipeline-step"><span class="step-icon geometry-icon">⌁</span><div><strong>Ground-plane motion</strong><small>Homography · metres / second</small></div><span class="step-state">CALIBRATED</span></div>
+            <div class="pipeline-connector"></div>
+            <div class="pipeline-step"><span class="step-icon risk-icon">△</span><div><strong>Approach-risk screen</strong><small>Closest approach · TTC estimate</small></div><span class="step-state">REVIEW</span></div>
+          </div>
+          <div class="pipeline-foot"><span class="foot-pulse"></span><span>Risk flags are screening signals, not collision predictions.</span></div>
+        </div>
+      </section>
+
+      <section class="panel results-panel" id="results" hidden>
+        <div class="panel-head"><div><div class="panel-kicker">03 / OUTPUT</div><h2>Analysis review</h2></div><span class="job-pill" id="job-status">QUEUED</span></div>
+        <div class="job-summary" id="job-summary">Waiting for analysis…</div>
+        <div class="results-grid" id="results-content" hidden>
+          <div class="video-wrap"><div class="result-subhead"><strong>ANNOTATED VIDEO</strong><span>LOCAL RESULT</span></div><video id="result-video" controls playsinline></video></div>
+          <div class="event-wrap" id="events"><div class="result-subhead"><strong>EVENT LOG</strong><span id="event-count">0 EVENTS</span></div><div class="event-list" id="event-list"><div class="empty-events">No approach-risk events were logged for this clip.</div></div></div>
+        </div>
+        <div class="job-error" id="job-error" hidden></div>
+      </section>
+
+      <footer class="disclaimer"><span class="disclaimer-mark">!</span><span><b>Research prototype.</b> Detection, speed, and approach-risk outputs are unvalidated and may be wrong. Review events manually. Do not use for enforcement or decisions about individuals.</span><a href="https://github.com/bhuvzzs24-spec/SAFE-Drive" target="_blank" rel="noreferrer">PROJECT REPO ↗</a></footer>
+    </main>
+  </div>
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</body>
+</html>

@@ -9,6 +9,7 @@ SAFE-Drive is a research prototype for analyzing traffic video using calibrated 
 - Pairwise 2-D closest-approach/TTC screening using each track's positions and velocities.
 - Configurable, explainable risk scoring with missing-signal reporting.
 - Append-only JSONL event logging with content-addressed event identifiers.
+- Local review dashboard for video upload, asynchronous processing, annotated playback, and event review.
 - Optional computer-vision and OCR dependencies, so analysis modules can be used without downloading model weights.
 
 The starter code in `detector.py`, `main.py`, `near_miss.py`, `plate_reader.py`, `risk_engine.py`, and `speed_estimator.py` records the original prototype for comparison. `src/safe_drive/` contains the research modules. The original hard-coded pixel scale, horizontal-only TTC, plate-based automatic fine logic, and global near-miss attribution should not be used as scientific measurements.
@@ -19,7 +20,7 @@ The starter code in `detector.py`, `main.py`, `near_miss.py`, `plate_reader.py`,
 python -m venv .venv
 source .venv/bin/activate       # Windows: .venv\\Scripts\\activate
 python -m pip install -e .
-python -m pip install -e '.[vision]'  # only if running the video detector pipeline
+python -m pip install -e '.[vision,web]'  # video detector and local dashboard
 ```
 
 The first model run may download pretrained weights. Pin the exact model file and its SHA-256 in any experiment record. A pretrained general-object model does not detect helmet violations unless a validated helmet model is separately trained and supplied.
@@ -37,6 +38,16 @@ safe-drive video \
 ```
 
 The runner writes annotated video and pairwise approach-risk screening events. It does not read plates, infer helmet status, or issue fines. Track IDs are temporary within one clip. Review every event and validate calibration before interpreting the reported km/h values.
+
+## Local review dashboard
+
+Install the `vision` and `web` extras, then run:
+
+```bash
+python app.py
+```
+
+Open `http://127.0.0.1:5170`. Upload a traffic video and a site-specific calibration JSON, then review the annotated clip and event list. Jobs run one at a time in a local background worker. Job status is held in memory and resets when the server restarts; source videos and results are stored under ignored `local_data/`. The server binds to loopback and is intended for local research use only. Do not expose it to a network.
 
 ## Calibration comes before speed claims
 
@@ -58,6 +69,8 @@ No accuracy, safety, or publication claim is made by this repository. Results re
 ## Suggested evaluation plan
 
 See [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) for a paper-ready experimental protocol. Minimum reporting should include detector precision/recall and mAP at a declared IoU, tracking HOTA/IDF1, speed MAE/RMSE against independent radar or surveyed ground truth, near-miss event precision/recall at a predefined event definition, calibration error, latency/FPS on named hardware, confidence intervals, and failure cases. Split by camera/site and time, not randomly by adjacent video frames.
+
+See [`docs/PROJECT_REPORT.md`](docs/PROJECT_REPORT.md) for the current project report, implementation inventory, architecture, limits, and next research milestones.
 
 ## License and data
 

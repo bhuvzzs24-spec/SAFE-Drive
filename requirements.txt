@@ -9,3 +9,6 @@ PyYAML>=6.0
 
 # Optional OCR (disabled by default): pip install -e '.[ocr]'
 # easyocr>=1.7
+
+# Optional local dashboard: pip install -e '.[web]'
+# Flask>=3.0
