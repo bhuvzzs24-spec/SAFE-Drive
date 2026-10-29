@@ -1,5 +1,7 @@
 .venv/
 .env
+.env.*
+!.env.example
 config/camera.json
 __pycache__/
 *.py[cod]
@@ -11,9 +13,16 @@ outputs/
 local_data/
 *.mp4
 *.avi
+*.mov
+*.mkv
+*.webm
 *.db
 *.sqlite*
 *.pt
+*.pth
+*.safetensors
+*.pem
+*.key
 *.onnx
 *.engine
 datasets/

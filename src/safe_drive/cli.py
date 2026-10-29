@@ -3,8 +3,14 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict, deque
+from dataclasses import asdict
+import hashlib
+import importlib.metadata
+import importlib.util
 import json
+import math
 import os
+import platform
 from pathlib import Path
 import threading
 import time
@@ -14,36 +20,44 @@ from .risk import score_event
 from .rules import SpeedLimitRule, SpeedViolationConfirmer
 from .speed import SpeedEstimator
 from .tracking import TrackRegistry
-
-VEHICLE_CLASSES = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
-DETECTION_CLASSES = {0: "pedestrian", **VEHICLE_CLASSES}
-_SUPPORTED_CLASS_NAMES = {
-    "person": "pedestrian", "pedestrian": "pedestrian",
-    "car": "car", "motorcycle": "motorcycle", "motorbike": "motorcycle",
-    "bus": "bus", "truck": "truck",
-}
+from .video_time import FrameClock, RecordingTimeline
+from .vision import (DETECTION_CLASSES, VEHICLE_CLASSES, YoloDetector,
+                     detector_class_map, local_detector_weights, observed_tracks)
 
 
-def detector_class_map(names) -> dict[int, str]:
-    """Map the detector's declared labels to supported object categories."""
-    if isinstance(names, dict):
-        try:
-            labels = [(int(index), label) for index, label in names.items()]
-        except (TypeError, ValueError):
-            return {}
-    elif isinstance(names, (list, tuple)):
-        labels = list(enumerate(names))
-    else:
-        return {}
-    return {index: _SUPPORTED_CLASS_NAMES[str(label).strip().lower()]
-            for index, label in labels if str(label).strip().lower() in _SUPPORTED_CLASS_NAMES}
+def _sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def run_video(video: Path | str, calibration: Path | None, model_path: str, out_video: Path,
               events_path: Path, confidence: float,
               stop_event: threading.Event | None = None, duration_s: int | None = None,
               source_label: str | None = None, progress_callback=None,
-              speed_rule: SpeedLimitRule | None = None, event_callback=None) -> dict:
+              speed_rule: SpeedLimitRule | None = None, event_callback=None,
+              timestamp_mode: str | None = None, device: str | None = None,
+              max_frames: int = 1800, max_pixels: int = 2073600,
+              max_video_seconds: float = 60.0) -> dict:
+    # Preflight before expensive imports, downloads or output allocation.
+    weights = local_detector_weights(model_path)
+    is_stream = str(video).lower().startswith(("rtsp://", "rtsps://"))
+    if not is_stream and (not Path(video).is_file() or not Path(video).stat().st_size):
+        raise ValueError("Input video is missing or empty")
+    out_video, events_path = Path(out_video), Path(events_path)
+    frame_log_path, manifest_path = out_video.with_suffix(".tracks.jsonl"), out_video.with_suffix(".run.json")
+    targets = [out_video.resolve(), events_path.resolve(), frame_log_path.resolve(), manifest_path.resolve()]
+    if len(set(targets)) != len(targets) or any(path.exists() for path in targets):
+        raise ValueError("Use distinct, new output paths for each run; existing artifacts are never overwritten or appended.")
+    if not math.isfinite(confidence) or not 0 < confidence <= 1:
+        raise ValueError("confidence must be in (0, 1]")
+    os.environ["YOLO_AUTOINSTALL"] = "false"
+    os.environ["YOLO_OFFLINE"] = "true"
+    if not is_stream:
+        # File containers must not open nested HTTP/RTSP/network references.
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "protocol_whitelist;file"
     try:
         import cv2
         from ultralytics import YOLO
@@ -70,24 +84,28 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
             cal = {}
             calibration_error = "Calibration is invalid. Detection/tracking will continue; speed is unavailable."
-    detector = YOLO(model_path)
-    class_map = detector_class_map(getattr(detector, "names", None))
-    if not class_map:
-        raise SystemExit("Detector labels do not include supported pedestrian or vehicle classes.")
-    tracker = DeepSort(max_age=30)
+    device = device or os.environ.get("SAFE_DRIVE_DEVICE", "cpu")
+    detector = YoloDetector(YOLO(str(weights), task="detect"), confidence, device)
+    tracker_spec = importlib.util.find_spec("deep_sort_realtime")
+    bundled_embedder = Path(tracker_spec.origin).parent / "embedder/weights/mobilenetv2_bottleneck_wts.pt"
+    embedder_weights = Path(os.environ.get("SAFE_DRIVE_TRACKER_WEIGHTS", str(bundled_embedder))).expanduser().resolve()
+    if not embedder_weights.is_file() or not embedder_weights.stat().st_size:
+        raise ValueError("DeepSORT MobileNetV2 appearance weights are missing. Supply SAFE_DRIVE_TRACKER_WEIGHTS or the package's bundled checkpoint.")
+    tracker = DeepSort(max_age=30, n_init=3, embedder="mobilenet", bgr=True,
+                       half=False, embedder_gpu=False, embedder_wts=str(embedder_weights))
     helmet_model = None
     helmet_weights = os.environ.get("SAFE_DRIVE_HELMET_MODEL", "").strip()
     if helmet_weights:
         from .helmet import HelmetInference
         helmet_model = HelmetInference.from_path(helmet_weights)
     source_text = str(video)
-    is_stream = source_text.lower().startswith(("rtsp://", "rtsps://"))
     if is_stream and hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC") and hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
         params = [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 8000, cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000]
         cap = cv2.VideoCapture(source_text, cv2.CAP_FFMPEG, params)
     else:
-        cap = cv2.VideoCapture(source_text if is_stream else str(video))
+        cap = cv2.VideoCapture(source_text if is_stream else str(video),cv2.CAP_FFMPEG)
     if not cap.isOpened():
+        cap.release()
         raise SystemExit("Could not open the video source. Check the file or camera connection settings.")
     fps = cap.get(cv2.CAP_PROP_FPS)
     if is_stream and (not np.isfinite(fps) or fps <= 0):
@@ -95,23 +113,50 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
     if not np.isfinite(fps) or fps <= 0:
         cap.release()
         raise SystemExit("Video has no valid frame rate; use a video with reliable timestamps")
-    width, height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    out_video.parent.mkdir(parents=True, exist_ok=True)
-    out_video_writer = cv2.VideoWriter(str(out_video), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+    raw_width, raw_height = cap.get(cv2.CAP_PROP_FRAME_WIDTH), cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+    if not all(math.isfinite(v) and v > 0 for v in (raw_width, raw_height)):
+        cap.release()
+        raise ValueError("Video source has invalid frame dimensions")
+    width, height = int(raw_width), int(raw_height)
+    if width*height > max_pixels or fps > 120:
+        cap.release()
+        raise ValueError("Video exceeds the configured resolution or frame-rate limit")
+    mode = "arrival" if is_stream else timestamp_mode or os.environ.get("SAFE_DRIVE_TIMESTAMP_MODE", "pts")
+    try:
+        clock = FrameClock(fps, mode)
+        if plane is not None and cal.get("image_size_px") is not None and cal["image_size_px"] != [width, height]:
+            plane = None
+            calibration_error = "Calibration image_size_px does not match the video dimensions. Speed is unavailable."
+    except Exception:
+        cap.release()
+        raise
+    try:
+        out_video.parent.mkdir(parents=True, exist_ok=True)
+        events_path.parent.mkdir(parents=True, exist_ok=True)
+        out_video_writer = cv2.VideoWriter(str(out_video), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+    except Exception:
+        cap.release()
+        raise
     if not out_video_writer.isOpened():
         cap.release()
+        out_video_writer.release()
         raise SystemExit(f"Cannot create output video: {out_video}")
+    recording = RecordingTimeline(out_video_writer, fps)
 
     speed = SpeedEstimator()
-    speed_rule = SpeedViolationConfirmer(speed_rule or SpeedLimitRule(None))
-    locations = defaultdict(lambda: deque(maxlen=8))
+    configured_rule = speed_rule or SpeedLimitRule(None)
+    speed_rule = SpeedViolationConfirmer(configured_rule)
+    locations = defaultdict(lambda: deque(maxlen=512))
     registry = TrackRegistry(max_idle_seconds=2.0, trail_length=40)
     cooldown = defaultdict(lambda: -10**9)
     frame_index = 0
     stream_started = time.monotonic()
     stream_ended = False
     event_source = source_label or ("live_camera" if is_stream else Path(video).name)
+    frame_log = None
     try:
+        events_path.touch(exist_ok=False)  # a zero-event run still has a JSONL artifact
+        frame_log = frame_log_path.open("x", encoding="utf-8")
         while True:
             if stop_event and stop_event.is_set():
                 break
@@ -121,53 +166,54 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
             if not ok:
                 stream_ended = is_stream and not (stop_event and stop_event.is_set())
                 break
-            now = time.monotonic() - stream_started if is_stream else frame_index / fps
-            detections = []
-            result = detector(frame, verbose=False, conf=confidence)[0]
-            for box in result.boxes:
-                cls, conf = int(box.cls[0]), float(box.conf[0])
-                if cls not in class_map:
-                    continue
-                x1, y1, x2, y2 = map(float, box.xyxy[0].cpu().numpy())
-                detections.append(([x1, y1, x2 - x1, y2 - y1], conf, class_map[cls]))
-            tracks = tracker.update_tracks(detections, frame=frame)
+            if frame.shape != (height, width, 3):
+                raise ValueError("Video frame dimensions changed during capture; recording/calibration would be invalid")
+            now = clock.advance(cap.get(cv2.CAP_PROP_POS_MSEC), time.monotonic() - stream_started)
+            if frame_index >= max_frames or (not is_stream and now > max_video_seconds):
+                raise ValueError("Video exceeds the configured frame-count or duration limit; supply a shorter clip")
+            for expired_id in registry.expire(now):
+                speed.clear(expired_id)
+                speed_rule.clear(expired_id)
+                locations.pop(expired_id, None)
+            detections = detector.detect(frame)
+            tracks = observed_tracks(tracker, detections, frame)
             helmet_by_track = {}
             if helmet_model:
                 person_boxes = []
                 for candidate in tracks:
-                    if not candidate.is_confirmed() or candidate.time_since_update > 0:
-                        continue
-                    class_getter = getattr(candidate, "get_det_class", None)
-                    if class_getter and class_getter() == "pedestrian":
-                        person_boxes.append((str(candidate.track_id),
-                                             [float(v) for v in candidate.to_ltrb()]))
+                    if candidate.object_class == "pedestrian":
+                        person_boxes.append((candidate.track_id, candidate.bbox_xyxy))
                 if person_boxes:
                     helmet_by_track = helmet_model.associate(person_boxes, helmet_model.detect(frame))
             active = []
             for track in tracks:
-                if not track.is_confirmed() or track.time_since_update > 0:
-                    continue
-                tid = str(track.track_id)
-                box = [float(v) for v in track.to_ltrb()]
-                class_getter = getattr(track, "get_det_class", None)
-                conf_getter = getattr(track, "get_det_conf", None)
-                vehicle_class = (class_getter() if class_getter else None) or "vehicle"
+                tid, box, vehicle_class = track.track_id, track.bbox_xyxy, track.object_class
                 helmet_class = helmet_by_track.get(tid) if vehicle_class == "pedestrian" else None
-                confidence_value = conf_getter() if conf_getter else None
-                track_confidence = float(confidence_value) if confidence_value is not None else None
+                track_confidence = track.confidence
                 position = None
                 estimate = None
                 if plane is not None:
-                    x_m, y_m = plane.bottom_centres([box])[0]
-                    position = (float(x_m), float(y_m))
-                    locations[tid].append((now, *position))
-                    if vehicle_class != "pedestrian":
-                        estimate = speed.update(tid, *position, now)
-                velocity = (0.0, 0.0)
+                    try:
+                        x_m, y_m = plane.bottom_centres([box])[0]
+                        position = (float(x_m), float(y_m))
+                        locations[tid].append((now, *position))
+                        while len(locations[tid]) > 2 and now - locations[tid][0][0] > 1.0:
+                            locations[tid].popleft()
+                        if vehicle_class != "pedestrian":
+                            estimate = speed.update(tid, *position, now)
+                            if estimate.quality == "implausible_speed_rejected":
+                                locations[tid].clear()
+                                locations[tid].append((now, *position))
+                    except ValueError:
+                        # A contact point at the horizon must not crash a job or
+                        # retain old metric evidence for this object.
+                        speed.clear(tid)
+                        locations.pop(tid, None)
+                velocity = None
                 if position is not None and len(locations[tid]) >= 2:
                     a, b = locations[tid][0], locations[tid][-1]
                     dt = b[0] - a[0]
-                    if dt > 0:
+                    if dt >= speed.min_baseline_s:
                         velocity = ((b[1] - a[1]) / dt, (b[2] - a[2]) / dt)
                 track_record = registry.observe(
                     tid, now, box, str(vehicle_class), track_confidence,
@@ -203,7 +249,7 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
                     label += f" {track_confidence:.2f}"
                 speed_label = (f"{estimate.speed_kmh:.1f} km/h" if estimate and estimate.speed_kmh is not None
                                else "speed unavailable" if vehicle_class == "pedestrian" or plane is None
-                               else "calibrating")
+                               else "speed warming up" if estimate and estimate.quality == "warming_up" else "speed unavailable")
                 label += " | " + speed_label
                 if helmet_class:
                     label += " | " + helmet_class.replace("_", " ")
@@ -214,21 +260,22 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
                 if len(points) >= 2:
                     cv2.polylines(frame, [np.asarray(points, dtype=np.int32)], False, color, 2)
 
-            for i, first in enumerate(active if plane is not None else []):
-                for second in active[i + 1:]:
+            measurable = [item for item in active if item["position"] is not None and item["velocity"] is not None]
+            for i, first in enumerate(measurable):
+                for second in measurable[i + 1:]:
                     enc = analyse_pair(first["id"], second["id"], first["position"], first["velocity"],
                                        second["position"], second["velocity"])
                     if enc.risk not in ("high", "elevated"):
                         continue
                     pair = tuple(sorted((enc.track_a, enc.track_b)))
                     # Limit repeated alerts from one persistent encounter; events still include frame/time.
-                    if frame_index - cooldown[pair] < int(fps * 2):
+                    if now - cooldown[pair] < 2.0:
                         continue
-                    cooldown[pair] = frame_index
+                    cooldown[pair] = now
                     event_payload = {
                         "event_type": "approach_risk_screen", "source": event_source,
                         "camera_id": cal.get("camera_id", "unspecified"), "frame": frame_index,
-                        "timestamp_s": round(now, 3), "encounter": enc,
+                        "timestamp_s": round(now, 3), "encounter": asdict(enc),
                         "tracks": [first, second], "risk": score_event(None, False, None, True),
                         "review_required": True
                     }
@@ -238,25 +285,45 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
                         event_callback(event_payload)
                     cv2.putText(frame, f"REVIEW: {enc.risk.upper()} APPROACH {eid[:8]}",
                                 (20, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            out_video_writer.write(frame)
+            frame_log.write(json.dumps({"frame": frame_index, "timestamp_s": now,
+                                        "detections": len(detections), "tracks": active}, allow_nan=False) + "\n")
+            recording.write(frame, now)
             frame_index += 1
-            expired = registry.expire(now)
-            for expired_id in expired:
-                speed.clear(expired_id)
-                speed_rule.clear(expired_id)
-                locations.pop(expired_id, None)
             if progress_callback and frame_index % 30 == 0:
                 progress_callback(frame_index, round(time.monotonic() - stream_started, 1), registry.summary())
     finally:
         cap.release()
         out_video_writer.release()
+        if frame_log is not None:
+            frame_log.close()
     if frame_index == 0:
         raise SystemExit("The source ended or stopped before delivering a usable frame.")
     registry.expire(now + registry.max_idle_seconds + 0.001)
-    return {"frames_processed": frame_index, "source_ended": stream_ended,
+    elapsed = time.monotonic() - stream_started
+    result = {"frames_processed": frame_index, "source_ended": stream_ended,
             "stopped": bool(stop_event and stop_event.is_set()),
             "calibration_status": "calibrated" if plane is not None else "unavailable",
-            "calibration_message": calibration_error, "tracks": registry.summary()}
+            "calibration_message": calibration_error, "tracks": registry.summary(),
+            "timestamp_source": mode, "output_frames": recording.next_index,
+            "timing_note": {"pts":"Decoded presentation timestamps, normalized to the first frame.",
+                            "cfr":"User-selected constant-frame-rate assumption; verify against source metadata.",
+                            "arrival":"Host arrival times include decoding/network delays; not validated camera capture times."}[mode],
+            "processing_elapsed_s": elapsed, "processing_fps": frame_index / elapsed if elapsed > 0 else None,
+            "frame_log": frame_log_path.name,
+            "provenance": {"model_sha256": _sha256(weights), "model_name": weights.name,
+                           "tracker_weights_sha256": _sha256(embedder_weights),
+                           "input_sha256": None if is_stream else _sha256(video),
+                           "calibration_sha256": _sha256(calibration) if calibration else None,
+                           "device": device, "confidence": confidence,
+                           "python": platform.python_version(), "platform": platform.platform(),
+                           "code_sha256": {path.name: _sha256(path) for path in Path(__file__).parent.glob("*.py")},
+                           "class_map": detector.class_map,
+                           "source_fps": fps, "image_size_px": [width, height],
+                           "speed_rule": asdict(configured_rule),
+                           "versions": {name: importlib.metadata.version(name) for name in
+                                        ("numpy", "opencv-python", "ultralytics", "deep-sort-realtime", "torch", "torchvision")}}}
+    manifest_path.write_text(json.dumps(result, indent=2, allow_nan=False), encoding="utf-8")
+    return result
 
 
 def main() -> None:
@@ -269,16 +336,34 @@ def main() -> None:
     video.add_argument("--output", type=Path, default=Path("outputs/annotated.mp4"))
     video.add_argument("--events", type=Path, default=Path("outputs/events.jsonl"))
     video.add_argument("--confidence", type=float, default=0.35)
+    video.add_argument("--timestamp-mode", choices=["pts", "cfr"], default=None,
+                       help="decoded timestamps by default; cfr requires independently verified constant-rate video")
+    video.add_argument("--device", default=None, help="Ultralytics device (default CPU or SAFE_DRIVE_DEVICE)")
     video.add_argument("--duration-sec", type=int, help="maximum live stream duration; ignored for video files")
     video.add_argument("--speed-limit-kmh", type=float, help="optional configured limit; disabled when omitted")
     video.add_argument("--speed-tolerance-kmh", type=float, default=0.0)
     video.add_argument("--speed-confirmation-sec", type=float, default=1.0)
+    calibration_check = sub.add_parser("calibration-check", help="report fit residuals and supplied independent distance checks")
+    calibration_check.add_argument("--calibration", required=True, type=Path)
     args = parser.parse_args()
     if args.command == "video":
-        run_video(args.input, args.calibration, args.model, args.output, args.events,
-                  args.confidence, duration_s=args.duration_sec,
+        result = run_video(args.input, args.calibration, args.model, args.output, args.events,
+                  args.confidence, duration_s=args.duration_sec, timestamp_mode=args.timestamp_mode, device=args.device,
                   speed_rule=SpeedLimitRule(args.speed_limit_kmh, args.speed_tolerance_kmh,
                                             args.speed_confirmation_sec))
+        print(json.dumps({"frames_processed": result["frames_processed"],
+                          "manifest": str(args.output.with_suffix(".run.json")),
+                          "frame_log": str(args.output.with_suffix(".tracks.jsonl"))}, indent=2))
+    elif args.command == "calibration-check":
+        import numpy as np
+        from .geometry import RoadPlane
+        config = json.loads(args.calibration.read_text(encoding="utf-8"))
+        plane = RoadPlane(config["image_points_px"], config["road_points_m"])
+        residual = plane.transform(plane.image_points) - plane.road_points_m
+        checks = plane.validate_distances(config.get("validation_distances", []))
+        print(json.dumps({"fit_rmse_m": float(np.sqrt(np.mean(np.sum(residual**2, axis=1)))),
+                          "independent_distance_checks": checks,
+                          "warning": "Fit residuals are not independent validation. Verify the survey, endpoint independence, camera pose and resolution."}, indent=2))
 
 
 if __name__ == "__main__":

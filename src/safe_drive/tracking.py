@@ -64,8 +64,8 @@ class TrackRegistry:
         rec.last_seen_s = timestamp_s
         rec.bbox_xyxy = bbox
         rec.confidence = confidence
-        rec.speed_kmh = speed_kmh if speed_kmh is not None and math.isfinite(speed_kmh) else None
-        rec.speed_quality = speed_quality if rec.speed_kmh is not None else "uncalibrated"
+        rec.speed_kmh = speed_kmh if speed_kmh is not None and math.isfinite(speed_kmh) and speed_kmh >= 0 else None
+        rec.speed_quality = speed_quality
         rec.helmet_class = helmet_class
         rec.active = True
         rec.observations += 1

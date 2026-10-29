@@ -226,6 +226,9 @@ class SQLiteStore:
         if not event_id:
             raise ValueError("event_id is required for event persistence")
         encounter = event.get("encounter") or {}
+        if hasattr(encounter, "__dataclass_fields__"):
+            from dataclasses import asdict
+            encounter = asdict(encounter)
         with self._connect() as conn:
             cursor = conn.execute("""INSERT OR IGNORE INTO violation_events
                 (event_id,session_id,camera_id,track_id,event_type,timestamp_s,confidence,speed_kmh,
@@ -328,3 +331,11 @@ class SQLiteStore:
                 "events": int(events["events"]), "pending_events": int(events["pending"]),
                 "reviewed_events": int(events["reviewed"]),
                 "activity": [{"day": row["day"], "sessions": int(row["sessions"])} for row in reversed(activity)]}
+
+    def recover_interrupted_sessions(self) -> int:
+        """One-process startup only; never automatically retry private sources."""
+        with self._connect() as conn:
+            result = conn.execute("""UPDATE analysis_sessions SET status='failed',
+                error_message='Service restarted before analysis completed.',completed_at=?
+                WHERE status IN ('queued','running','stopping')""",(self._now(),))
+            return result.rowcount

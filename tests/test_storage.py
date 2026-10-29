@@ -45,6 +45,15 @@ class SQLiteStoreTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.store.review_event("missing", "verified", "Reviewer")
 
+    def test_real_encounter_dataclass_is_accepted_by_storage(self):
+        from safe_drive.encounters import analyse_pair
+        event = {"event_id":"encounter", "event_type":"approach_risk_screen", "timestamp_s":1,
+                 "encounter":analyse_pair("1","2",[0,0],[1,0],[2,0],[-1,0])}
+        self.assertTrue(self.store.insert_event("s1",event))
+        loaded = self.store.list_events("s1")[0]
+        self.assertEqual(loaded["encounter"]["risk"],"high")
+        self.assertEqual(loaded["encounter"]["track_a"],"1")
+
     def test_analytics_are_aggregated_from_saved_sessions_tracks_and_reviews(self):
         self.store.insert_event("s1", {"event_id": "evt-analytics", "event_type": "speed_limit_exceeded"})
         self.store.review_event("evt-analytics", "verified", "Reviewer")

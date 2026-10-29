@@ -18,9 +18,9 @@ class SpeedEstimator:
     def __init__(self, window_s: float = 1.0, min_baseline_s: float = 0.25,
                  max_baseline_s: float = 2.0, max_points: int = 64,
                  smoothing_points: int = 5, max_speed_kmh: float = 250.0):
-        if not 0 < min_baseline_s <= window_s <= max_baseline_s:
+        if not all(math.isfinite(v) for v in (min_baseline_s, window_s, max_baseline_s)) or not 0 < min_baseline_s <= window_s <= max_baseline_s:
             raise ValueError("require 0 < min_baseline_s <= window_s <= max_baseline_s")
-        if smoothing_points < 1 or max_speed_kmh <= 0:
+        if smoothing_points < 1 or max_points < 2 or not math.isfinite(max_speed_kmh) or max_speed_kmh <= 0:
             raise ValueError("smoothing_points and max_speed_kmh must be positive")
         self.window_s = window_s
         self.min_baseline_s = min_baseline_s
@@ -33,9 +33,12 @@ class SpeedEstimator:
         if not all(math.isfinite(v) for v in (x_m, y_m, timestamp_s)):
             raise ValueError("position and timestamp must be finite")
         hist = self.history[track_id]
-        if hist and timestamp_s <= hist[-1][0]:
-            # A timestamp reset means a new clip/track segment, never a negative speed.
+        if timestamp_s < 0:
+            raise ValueError("timestamp must be non-negative")
+        if hist and (timestamp_s <= hist[-1][0] or timestamp_s - hist[-1][0] > self.max_baseline_s):
+            # Neither smoothing nor trajectories may cross clip resets/long gaps.
             hist.clear()
+            self.speed_history[track_id].clear()
         hist.append((timestamp_s, x_m, y_m))
         if len(hist) < 2:
             return SpeedEstimate(None, "warming_up", 0.0)
@@ -47,6 +50,9 @@ class SpeedEstimator:
         dt = now - old[0]
         speed = math.hypot(hist[-1][1] - old[1], hist[-1][2] - old[2]) / dt * 3.6
         if speed > self.max_speed_kmh:
+            hist.clear()
+            hist.append((timestamp_s, x_m, y_m))
+            self.speed_history[track_id].clear()
             return SpeedEstimate(None, "implausible_speed_rejected", dt)
         self.speed_history[track_id].append(speed)
         return SpeedEstimate(round(median(self.speed_history[track_id]), 2), "calibrated_estimate", dt)

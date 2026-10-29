@@ -33,6 +33,7 @@ class SpeedViolationConfirmer:
         self.max_observation_gap_s = float(max_observation_gap_s)
         self._states: dict[str, dict] = {}
         self._last_event_s: dict[str, float] = {}
+        self._last_observation_s: dict[str, float] = {}
 
     def update(self, track_id: str | int, speed_kmh: float | None, timestamp_s: float,
                speed_quality: str, confidence: float | None = None) -> dict | None:
@@ -41,11 +42,16 @@ class SpeedViolationConfirmer:
         if not math.isfinite(timestamp_s):
             raise ValueError("timestamp must be finite")
         key = str(track_id)
+        last = self._last_observation_s.get(key)
+        if last is not None and timestamp_s <= last:
+            self.clear(key)
+            self._last_event_s.pop(key, None)
+        self._last_observation_s[key] = timestamp_s
         state = self._states.get(key)
         valid = speed_kmh is not None and speed_quality == "calibrated_estimate" and math.isfinite(speed_kmh)
         if not valid:
-            if state and timestamp_s - state["last_seen_s"] > self.max_observation_gap_s:
-                self._states.pop(key, None)
+            # Missing evidence cannot count toward continuous exceedance time.
+            self._states.pop(key, None)
             return None
 
         threshold = self.rule.limit_kmh + self.rule.tolerance_kmh
@@ -83,3 +89,4 @@ class SpeedViolationConfirmer:
 
     def clear(self, track_id: str | int) -> None:
         self._states.pop(str(track_id), None)
+        self._last_observation_s.pop(str(track_id), None)

@@ -47,6 +47,43 @@ class DashboardApiTests(unittest.TestCase):
         response = self.client.post("/api/events/missing/review", json={"decision": "verified", "reviewer": "QA"})
         self.assertEqual(response.status_code, 403)
 
+    def test_frontend_assets_and_object_url_preview_policy(self):
+        for filename, expected in (("app.css", "text/css"), ("workspace.css", "text/css"),
+                                   ("app.js", "javascript"), ("ui-core.js", "javascript"),
+                                   ("theme.js", "javascript")):
+            with self.subTest(filename=filename):
+                response = self.client.get(f"/static/{filename}")
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(expected, response.mimetype)
+                response.close()
+        policy = self.client.get("/").headers["Content-Security-Policy"]
+        self.assertIn("media-src 'self' blob:", policy)
+        self.assertIn("script-src 'self'", policy)
+
+    def test_saved_session_contract_preserves_missing_measurements_and_review(self):
+        # Synthetic storage fixture: this test does not exercise AI inference.
+        session_id = "b" * 32
+        store = self.dashboard.STORE
+        store.create_session(session_id, "test-camera", "uploaded_video", "fixture.mp4", "not-loaded.pt", "missing")
+        store.save_tracks(session_id, {"tracks": [{
+            "track_id": "4", "vehicle_class": "pedestrian", "first_seen_s": 0, "last_seen_s": 2,
+            "bbox_xyxy": [1, 2, 20, 40], "trajectory": [[10, 20]], "confidence": 0.8,
+            "speed_kmh": None, "speed_quality": "uncalibrated", "observations": 3, "active": False,
+        }]})
+        store.insert_event(session_id, {"event_id": "contract-event", "event_type": "approach_risk_screen",
+            "timestamp_s": 1.5, "frame": 15, "encounter": {"track_a": "4", "track_b": "8", "risk": "high"}})
+        store.review_event("contract-event", "rejected", "Test reviewer")
+        store.update_session(session_id, "completed", 20)
+        sessions = self.client.get("/api/sessions").get_json()["sessions"]
+        self.assertEqual(sessions[0]["calibration_status"], "missing")
+        tracks = self.client.get(f"/api/sessions/{session_id}/tracks").get_json()["tracks"]
+        self.assertEqual(tracks[0]["object_class"], "pedestrian")
+        self.assertIsNone(tracks[0]["speed_kmh"])
+        events = self.client.get(f"/api/sessions/{session_id}/events").get_json()["events"]
+        self.assertEqual(events[0]["encounter"]["track_a"], "4")
+        self.assertEqual(events[0]["review_status"], "rejected")
+        self.assertEqual(events[0]["reviewer"], "Test reviewer")
+
 
 if __name__ == "__main__":
     unittest.main()

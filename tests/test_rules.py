@@ -33,6 +33,15 @@ class SpeedRuleTests(unittest.TestCase):
         confirmer.update("a", 45, 1, "calibrated_estimate")
         self.assertIsNone(confirmer.update("a", 80, 2, "calibrated_estimate"))
 
+    def test_missing_measurements_interrupt_confirmation_and_reset_handles_new_segment(self):
+        c = SpeedViolationConfirmer(SpeedLimitRule(30,confirmation_s=1))
+        self.assertIsNone(c.update("a",40,0,"calibrated_estimate"))
+        self.assertIsNone(c.update("a",None,.5,"warming_up"))
+        self.assertIsNone(c.update("a",40,1,"calibrated_estimate"))
+        self.assertIsNotNone(c.update("a",40,2,"calibrated_estimate"))
+        self.assertIsNone(c.update("a",40,0,"calibrated_estimate"))
+        self.assertIsNotNone(c.update("a",40,1,"calibrated_estimate"))
+
 
 if __name__ == "__main__":
     unittest.main()

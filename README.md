@@ -1,5 +1,7 @@
 # SAFE-Drive Research Toolkit
 
+For the prepared (not deployed) controlled public-demo configuration, security boundaries, operator accounts and host setup, see [Controlled demo deployment guide](docs/CONTROLLED_DEMO.md). Keep local research mode on loopback. Production defaults to a read-only sample view; private evidence requires authentication and live cameras are disabled.
+
 SAFE-Drive is a research prototype for analyzing traffic video using calibrated vehicle trajectories and transparent encounter-risk signals. This repository is a cleaned, research-oriented continuation of the supplied student prototype. It is not a validated enforcement product and does not issue fines or identify people.
 
 ## What is implemented
@@ -23,7 +25,9 @@ python -m pip install -e .                 # local dashboard and core analysis
 python -m pip install -e '.[vision]'        # video detector/tracker pipeline
 ```
 
-The first model run may download pretrained weights. Pin the exact model file and its SHA-256 in any experiment record. A pretrained general-object model does not detect helmet violations unless a validated helmet model is separately trained and supplied.
+Video analysis requires an existing local Ultralytics **detection `.pt` checkpoint** supplied by you. Missing names such as `yolov8n.pt` fail explicitly; the runner does not download weights or auto-install model dependencies. Classification, pose, OBB, segmentation, YAML architectures and exported formats are outside the supported runner contract. Class names are read from the checkpoint rather than assuming COCO IDs. A general-object model does not detect helmet violations.
+
+See [reproducible vision setup and evaluation](docs/VISION_INTEGRATION.md) for the exact interfaces, prerequisites, timestamp policy, artifact formats, synthetic checks, and real-inference evaluation procedure.
 
 ## Run one video
 
@@ -32,12 +36,13 @@ After creating a site-specific calibration file and installing the optional visi
 ```bash
 safe-drive video \
   --input path/to/traffic.mp4 \
+  --model /absolute/path/to/licensed-detection-weights.pt \
   --calibration config/site-01.json \
   --output outputs/annotated.mp4 \
   --events outputs/events.jsonl
 ```
 
-The runner writes annotated video, per-track summaries and screening events. It processes local video or RTSP/RTSPS input; add `--duration-sec 300` to bound a live session. Detector labels are mapped by name for supported cars, motorcycles, buses, trucks, and pedestrians; DeepSORT assigns session-local IDs to all of them. Pedestrians do not receive vehicle speed estimates or speed events. Calibration is optional: without valid measured calibration, detection/tracking continues and speed/TTC remain unavailable. A speed-limit event rule is disabled by default; set `--speed-limit-kmh`, `--speed-tolerance-kmh` and `--speed-confirmation-sec` to configure a rule. It does not read plates or issue fines. Review every event and validate calibration before interpreting km/h values.
+The runner writes annotated video, a per-frame `.tracks.jsonl`, a `.run.json` manifest, and screening events (including an empty JSONL on zero-event runs). Use new output paths for each run. It processes local video or RTSP/RTSPS input; add `--duration-sec 300` to bound a live session. Files use decoded presentation timestamps by default; repeated, reversed or missing timestamps fail. Use `--timestamp-mode cfr` only for independently verified constant-rate footage. Detector labels are mapped by name for supported cars, motorcycles, buses, trucks, and pedestrians; DeepSORT assigns session-local IDs to all of them. Pedestrians do not receive vehicle speed estimates or speed events. Calibration is optional: without valid measured calibration, detection/tracking continues and speed/TTC remain unavailable. A speed-limit event rule is disabled by default; set `--speed-limit-kmh`, `--speed-tolerance-kmh` and `--speed-confirmation-sec` to configure a rule. It does not read plates or issue fines. Review every event and validate calibration before interpreting km/h values.
 
 ## Local review dashboard
 
@@ -47,11 +52,17 @@ Install the `vision` extra, then run:
 python app.py
 ```
 
-Open `http://127.0.0.1:5170`. Choose **Video file** to upload a clip, or **Live IP camera** to enter an RTSP/RTSPS stream address and select a bounded capture duration. Calibration JSON is optional; without valid calibration, detections and tracks still run while speed is clearly unavailable. You can set an optional per-analysis speed limit, tolerance and minimum exceedance duration; blank limit disables speed events. Set `SAFE_DRIVE_HELMET_MODEL` to an existing compatible local weights file to enable experimental helmet-box inference on tracked pedestrians. The model must use the exact class order in `docs/HELMET_MODEL.md`; unmatched heads remain unclassified and ambiguous associations are marked uncertain. For live sessions, the event list updates as alerts appear; the annotated recording is available when the session ends or is stopped. Jobs run one at a time in a local background worker. Transient job status is held in memory, while sessions, vehicle and pedestrian tracks, events and review decisions persist in SQLite at `local_data/safe_drive.sqlite3`; uploaded clips and results remain as files under ignored `local_data/`. Camera stream addresses are passed to the worker for the session and omitted from event records and error logs. The server binds to loopback and is intended for local research use only. Do not expose it to a network.
+Open `http://127.0.0.1:5170`. Choose **Video file** to upload a short clip. Optional live cameras require a separately secured local operator instance, explicit enablement and a server-registered IP-literal source on the allowed-IP list; request-supplied stream URLs are rejected. Live cameras are always disabled in public mode. See `docs/CONTROLLED_DEMO.md` for the exact policy. Calibration JSON is optional; missing/invalid calibration leaves speed unavailable. Optional per-analysis speed rules use a configured limit, tolerance and confirmation duration; blank limit disables events. `SAFE_DRIVE_HELMET_MODEL` can select a separate compatible local helmet model with the class order in `docs/HELMET_MODEL.md`; inference remains experimental. Jobs run one at a time in bounded subprocesses, with at most one queued job. Sessions, tracks, events and reviewer decisions persist in SQLite at `local_data/safe_drive.sqlite3`, and evidence files remain under ignored `local_data/`. Interrupted jobs become failed after restart and are not automatically retried. Worker diagnostics and private camera sources are not logged. Local research mode binds to loopback; use the authenticated production configuration for any approved hosted demo.
 
 Live mode connects to the camera; it does not install software into camera firmware. The camera must expose an RTSP/RTSPS stream reachable from this computer, and OpenCV must support its transport and codec. This version has no ONVIF discovery or automatic reconnection and cannot guarantee real-time throughput on every computer. Some consumer cameras do not provide RTSP; check the camera or NVR settings.
 
 If no camera is configured, the dashboard explicitly reports **Demo / Upload Mode**. To configure a default source, copy `config/camera.example.json` to the ignored `config/camera.json`, then set its `mode` and source fields. Environment variables override the JSON config: `SAFE_DRIVE_CAMERA_URL`, `SAFE_DRIVE_CAMERA_ID`, and `SAFE_DRIVE_CAMERA_MODE`. `SAFE_DRIVE_CAMERA_URL` takes priority for RTSP. Copy `.env.example` for reference; the app does not automatically load `.env`, so export values in the shell before launching. Never commit camera credentials. The current runner supports upload and RTSP capture; webcam parsing is present but webcam capture wiring is a later stage. Review actions require reviewer name/initials and are stored as verified or rejected decisions; they do not issue penalties.
+
+The dashboard's shared session selector loads real saved tracks and events on any page. Overview includes searchable session history; Event Review combines type, severity, review-status and track-ID search with detailed inspection and persisted decisions. Light/dark theme preference is saved only in the browser. The mobile navigation opens from the menu button and supports Escape and keyboard focus.
+
+Calibration JSON receives client-side structure checks, followed by the worker's geometry checks. A structure check does not establish camera calibration accuracy. The downloadable blank template contains intentionally invalid null coordinates until measured values are supplied. Missing recordings and failed requests have explicit states; missing measurements are never replaced with zero.
+
+Frontend logic tests use Node's built-in runner: `node --test tests/test_ui_core.cjs`. The Flask API and core suite remains `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v`. These checks do not constitute real AI evaluation.
 
 ## Calibration comes before speed claims
 

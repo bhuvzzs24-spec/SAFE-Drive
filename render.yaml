@@ -1,0 +1,41 @@
+# Inert deployment template. Do not create/sync the service without approval.
+# starter + persistent disk are PAID resources; review cost before creation.
+services:
+  - type: web
+    name: safe-drive-controlled-demo
+    runtime: python
+    plan: starter
+    numInstances: 1
+    autoDeployTrigger: 'off'
+    buildCommand: pip install -e '.[deploy]'
+    startCommand: gunicorn --config gunicorn.conf.py app:app
+    healthCheckPath: /healthz
+    disk:
+      name: safe-drive-data
+      mountPath: /var/data
+      sizeGB: 5
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.15
+      - key: SAFE_DRIVE_ENV
+        value: production
+      - key: SAFE_DRIVE_SECRET
+        generateValue: true
+      - key: SAFE_DRIVE_ALLOWED_HOSTS
+        sync: false
+      - key: SAFE_DRIVE_USERS_JSON
+        sync: false
+      - key: SAFE_DRIVE_DATA
+        value: /var/data/safe-drive
+      - key: SAFE_DRIVE_DATABASE
+        value: /var/data/safe-drive/safe_drive.sqlite3
+      - key: SAFE_DRIVE_TRUST_PROXY
+        value: '1'
+      - key: SAFE_DRIVE_ALLOW_UPLOADS
+        value: '0'
+      - key: SAFE_DRIVE_ENABLE_CAMERAS
+        value: '0'
+      - key: SAFE_DRIVE_MAX_UPLOAD
+        value: '31457280'
+      - key: SAFE_DRIVE_JOB_TIMEOUT
+        value: '120'

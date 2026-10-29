@@ -27,6 +27,11 @@ def analyse_pair(track_a: str, track_b: str, pos_a: Sequence[float], vel_a: Sequ
     This is a screening signal, not a collision prediction: detector noise,
     turning, occlusion, and road topology are not represented.
     """
+    if not all(math.isfinite(v) and v > 0 for v in (horizon_s, ttc_threshold_s, distance_threshold_m)):
+        raise ValueError("screening horizon and thresholds must be positive and finite")
+    for vector in (pos_a, vel_a, pos_b, vel_b):
+        if np.asarray(vector).shape != (2,):
+            raise ValueError("positions and velocities must be finite 2-D vectors")
     r = np.asarray(pos_b, dtype=float) - np.asarray(pos_a, dtype=float)
     v = np.asarray(vel_b, dtype=float) - np.asarray(vel_a, dtype=float)
     if r.shape != (2,) or v.shape != (2,) or not np.isfinite([*r, *v]).all():
@@ -39,7 +44,7 @@ def analyse_pair(track_a: str, track_b: str, pos_a: Sequence[float], vel_a: Sequ
     ttc = float(np.linalg.norm(r)) / closing if radial_closing and closing > 1e-6 else None
     if ttc is not None and ttc <= ttc_threshold_s and distance <= distance_threshold_m:
         risk = "high"
-    elif t_closest < horizon_s and distance <= distance_threshold_m * 2:
+    elif radial_closing and 0 < t_closest < horizon_s and distance <= distance_threshold_m * 2:
         risk = "elevated"
     else:
         risk = "low"
