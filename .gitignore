@@ -27,3 +27,7 @@ local_data/
 *.engine
 datasets/
 data/
+
+# Private model training and evaluation artifacts
+training-runs/
+evaluation-runs/

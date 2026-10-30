@@ -5,6 +5,7 @@
   document.documentElement.dataset.theme = theme;
   document.addEventListener('DOMContentLoaded', () => {
     const button = document.getElementById('theme-toggle');
+    if (!button) return;
     const update = () => {
       const light = document.documentElement.dataset.theme === 'light';
       button.setAttribute('aria-pressed', String(light));

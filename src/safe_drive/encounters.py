@@ -27,6 +27,8 @@ def analyse_pair(track_a: str, track_b: str, pos_a: Sequence[float], vel_a: Sequ
     This is a screening signal, not a collision prediction: detector noise,
     turning, occlusion, and road topology are not represented.
     """
+    if track_a is None or track_b is None or not str(track_a).strip() or not str(track_b).strip() or str(track_a) == str(track_b):
+        raise ValueError("screening requires two distinct nonempty track IDs")
     if not all(math.isfinite(v) and v > 0 for v in (horizon_s, ttc_threshold_s, distance_threshold_m)):
         raise ValueError("screening horizon and thresholds must be positive and finite")
     for vector in (pos_a, vel_a, pos_b, vel_b):

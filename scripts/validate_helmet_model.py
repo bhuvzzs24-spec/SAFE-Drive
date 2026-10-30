@@ -1,46 +1,46 @@
-"""Run a held-out Ultralytics validation and print class-wise metrics."""
-from __future__ import annotations
-
+"""Evaluate a supplied local checkpoint on a labelled held-out test split."""
 import argparse
+import hashlib
+import json
+import math
+import os
 from pathlib import Path
-
-EXPECTED = ["full_face_helmet", "half_face_helmet", "no_helmet", "uncertain"]
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", type=Path, required=True)
-    parser.add_argument("--data", type=Path, required=True, help="held-out test dataset YAML")
-    parser.add_argument("--imgsz", type=int, default=640)
-    parser.add_argument("--device", default=None)
-    args = parser.parse_args()
-    if not args.model.is_file() or not args.data.is_file():
-        parser.error("model weights and dataset YAML must both exist")
-    try:
-        import yaml
-        from ultralytics import YOLO
-    except ImportError as exc:
-        raise SystemExit("Install validation dependencies with: pip install -e '.[vision]'") from exc
-    config = yaml.safe_load(args.data.read_text(encoding="utf-8"))
-    names = config.get("names") if isinstance(config, dict) else None
-    if isinstance(names, dict):
-        names = [names[index] for index in sorted(names)]
-    if names != EXPECTED:
-        parser.error(f"test classes must be ordered exactly as {EXPECTED}; received {names!r}")
-    model = YOLO(str(args.model))
-    metrics = model.val(data=str(args.data), split="test", imgsz=args.imgsz,
-                        device=args.device, plots=True, verbose=True)
-    box = metrics.box
-    print("\nClass-wise held-out test metrics")
-    for index, name in enumerate(EXPECTED):
-        precision = float(box.p[index]) if len(box.p) > index else float("nan")
-        recall = float(box.r[index]) if len(box.r) > index else float("nan")
-        map50 = float(box.ap50[index]) if len(box.ap50) > index else float("nan")
-        map5095 = float(box.ap[index]) if len(box.ap) > index else float("nan")
-        print(f"{name}: precision={precision:.4f} recall={recall:.4f} AP50={map50:.4f} AP50-95={map5095:.4f}")
-    print(f"Confusion matrix and plots: {getattr(metrics, 'save_dir', 'see Ultralytics validation output')}")
-    print("Publish these values only with dataset version, split protocol, confidence/IoU settings, and uncertainty intervals.")
+from safe_drive.helmet import HELMET_CLASSES,HelmetInference
+from safe_drive.helmet_dataset import validate_dataset
+from safe_drive.vision import local_detector_weights
 
 
-if __name__ == "__main__":
-    main()
+def class_metrics(box):
+    indices=[int(v) for v in box.ap_class_index]
+    result={}
+    for cls,name in enumerate(HELMET_CLASSES):
+        i=indices.index(cls) if cls in indices else None
+        values={}
+        for key,source in [('precision','p'),('recall','r'),('AP50','ap50'),('AP50_95','ap')]:
+            value=float(getattr(box,source)[i]) if i is not None else None
+            values[key]=value if value is not None and math.isfinite(value) else None
+        result[name]=values
+    return result
+
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--model',type=Path,required=True);parser.add_argument('--data',type=Path,required=True)
+    parser.add_argument('--imgsz',type=int,default=960);parser.add_argument('--device',default='cpu')
+    parser.add_argument('--report',type=Path,default=Path('evaluation-runs/helmet/evaluation.json'))
+    args=parser.parse_args()
+    if args.report.exists(): parser.error('use a new report path; evaluations are never overwritten')
+    dataset=validate_dataset(args.data);weights=local_detector_weights(args.model)
+    os.environ.update(YOLO_AUTOINSTALL='false',YOLO_OFFLINE='true')
+    from ultralytics import YOLO
+    model=YOLO(str(weights),task='detect');HelmetInference(model)
+    metrics=model.val(data=str(args.data.resolve()),split='test',imgsz=args.imgsz,device=args.device,
+                      project=str(args.report.parent),name='held-out',plots=True,verbose=True)
+    report={'task':'detect','taxonomy':list(HELMET_CLASSES),'dataset':dataset,'model_sha256':hashlib.sha256(weights.read_bytes()).hexdigest(),
+            'split':'test','image_size':args.imgsz,'device':args.device,'metrics':class_metrics(metrics.box),
+            'note':'Head-box accuracy only. Rider association, abstention and temporal events need separate labelled sequence evaluation.'}
+    args.report.parent.mkdir(parents=True,exist_ok=True)
+    args.report.write_text(json.dumps(report,indent=2,allow_nan=False)+'\n')
+    print(json.dumps(report,indent=2,allow_nan=False))
+
+if __name__=='__main__': main()

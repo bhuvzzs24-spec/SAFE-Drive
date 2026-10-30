@@ -87,7 +87,7 @@ See [`docs/RESEARCH_PLAN.md`](docs/RESEARCH_PLAN.md) for a paper-ready experimen
 
 See [`docs/PROJECT_REPORT.md`](docs/PROJECT_REPORT.md) for the current project report, implementation inventory, architecture, limits, and next research milestones.
 
-See [`docs/HELMET_MODEL.md`](docs/HELMET_MODEL.md) for the custom helmet-state dataset, training, validation and optional inference workflow. No helmet weights or data are bundled. The current rider association is geometric and single-frame; it is experimental and does not produce a compliance event or verified decision.
+See [`docs/HELMET_MODEL.md`](docs/HELMET_MODEL.md) for the custom helmet-state dataset, training, validation and optional inference workflow. No helmet weights or data are bundled. The three-class head detector uses conservative person/motorcycle association and temporal confirmation to create pending helmet-review records. Uncertain is an abstention, not a trained class. Rider association remains experimental, and predictions are never compliance findings. No training or real helmet inference has been performed without supplied data and weights.
 
 Run the tests with `python -m unittest discover -s tests -v`. The tests cover camera configuration, geometry, speed estimation, temporal speed rules, track registry behavior, and SQLite event/session persistence. End-to-end CV evaluation still requires representative labeled footage and independent ground truth.
 
@@ -105,3 +105,16 @@ See [SAFE-Drive final report](docs/SAFE_DRIVE_FINAL_REPORT.md) for verified feat
 - Optional helmet classification requires compatible trained weights via `SAFE_DRIVE_HELMET_MODEL`; no such model is bundled.
 - Accident detection is not implemented. Approach-risk screening is not an accident determination.
 - Do not commit CCTV footage, credentials, databases, `.venv`, or model weights.
+
+
+## Completion release: model readiness and accountable review
+
+The premium landing and all nine workspaces retain the existing Flask APIs. Settings distinguishes configured path, a nonempty file, discoverable dependencies, model-load verification and real inference verification; a filename is never an operational status. Dependency discovery does not prove native imports work. The private Settings view shows the actual configured database path. Public visitors see no private paths or records.
+
+Helmet preparation, annotation validation, training, held-out evaluation and checkpoint packaging are documented in [HELMET_MODEL.md](docs/HELMET_MODEL.md). The exact detection labels are `0: full_face_helmet`, `1: half_face_helmet`, `2: no_helmet`. `uncertain` is a review abstention. Training/evaluation output folders are ignored by Git. Install, startup, upload, calibration and deployment instructions above continue to apply.
+
+Analytics supports **Entire workspace** and **Selected session** using persisted data (`GET /api/analytics?session_id=...` for authorized users). Helmet observations and pending/verified/rejected review records use the existing session/track/event APIs. Camera calibration must match the registered camera ID. Initial camera connections have at most two configured retries; an interrupted stream ends the session and requires a new analysis rather than silently reusing track/time provenance.
+
+Optional private configuration: `SAFE_DRIVE_CAMERA_CONNECT_RETRIES=1` (0–2), `SAFE_DRIVE_RISK_HORIZON_S=5`, `SAFE_DRIVE_RISK_TTC_S=1.5`, `SAFE_DRIVE_RISK_DISTANCE_M=2`. Risk thresholds are recorded with events and the run manifest. These are experimental screening rules, not accident detection.
+
+Current acceptance results and exact asset/runtime blockers are recorded in [FINAL_ACCEPTANCE.md](docs/FINAL_ACCEPTANCE.md). Earlier project reports and their PDF are historical snapshots; their older test counts and feature descriptions are not this release's acceptance results. No real camera operation, model accuracy, training outcome or successful detector inference is implied by synthetic or mocked tests.

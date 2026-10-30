@@ -35,6 +35,18 @@ def main():
         resource.setrlimit(resource.RLIMIT_CPU,(config["timeout_s"],config["timeout_s"]+1))
         resource.setrlimit(resource.RLIMIT_FSIZE,(512*1024*1024,512*1024*1024))
         resource.setrlimit(resource.RLIMIT_NOFILE,(128,128))
+        from .vision import local_detector_weights
+        try:
+            local_detector_weights(config["model"])
+        except (ValueError,OSError):
+            atomic_json(folder/"failure.json",{"code":"detector_weights_unavailable"})
+            return 1
+        if os.environ.get("SAFE_DRIVE_HELMET_MODEL"):
+            try:
+                local_detector_weights(os.environ["SAFE_DRIVE_HELMET_MODEL"])
+            except (ValueError,OSError):
+                atomic_json(folder/"failure.json",{"code":"helmet_weights_unavailable"})
+                return 1
         from .cli import run_video
         from .rules import SpeedLimitRule
         from .storage import SQLiteStore
@@ -49,11 +61,11 @@ def main():
             SpeedLimitRule(**config["speed_rule"]),lambda event:store.insert_event(config["id"],event))
         atomic_json(folder/"result.json",result)
     except BaseException:
-        atomic_json(folder/"failure.json",{"error":"Analysis failed. Check the supplied video, configured weights, calibration and worker limits."})
+        atomic_json(folder/"failure.json",{"code":"processing_failed"})
         raise SystemExit(1) from None
     finally:
         watchdog.cancel()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main() or 0)

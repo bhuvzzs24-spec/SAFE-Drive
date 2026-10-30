@@ -93,17 +93,34 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
         raise ValueError("DeepSORT MobileNetV2 appearance weights are missing. Supply SAFE_DRIVE_TRACKER_WEIGHTS or the package's bundled checkpoint.")
     tracker = DeepSort(max_age=30, n_init=3, embedder="mobilenet", bgr=True,
                        half=False, embedder_gpu=False, embedder_wts=str(embedder_weights))
+    from .helmet import HelmetReviewConfirmer, HELMET_CLASSES
+    helmet_review = HelmetReviewConfirmer(float(os.environ.get("SAFE_DRIVE_HELMET_CONFIRM_S", "1")),
+        int(os.environ.get("SAFE_DRIVE_HELMET_MIN_OBSERVATIONS", "5")),
+        float(os.environ.get("SAFE_DRIVE_HELMET_MAX_GAP_S", ".5")))
     helmet_model = None
     helmet_weights = os.environ.get("SAFE_DRIVE_HELMET_MODEL", "").strip()
     if helmet_weights:
         from .helmet import HelmetInference
         helmet_model = HelmetInference.from_path(helmet_weights)
+    risk_options = {"horizon_s":float(os.environ.get("SAFE_DRIVE_RISK_HORIZON_S","5")),
+                    "ttc_threshold_s":float(os.environ.get("SAFE_DRIVE_RISK_TTC_S","1.5")),
+                    "distance_threshold_m":float(os.environ.get("SAFE_DRIVE_RISK_DISTANCE_M","2"))}
+    if not all(math.isfinite(v) and v>0 for v in risk_options.values()):
+        raise ValueError("approach-risk thresholds must be finite and positive")
+    retries = int(os.environ.get("SAFE_DRIVE_CAMERA_CONNECT_RETRIES","1")) if is_stream else 0
+    if not 0 <= retries <= 2:
+        raise ValueError("camera connection retries must be between zero and two")
     source_text = str(video)
     if is_stream and hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC") and hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
         params = [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 8000, cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000]
         cap = cv2.VideoCapture(source_text, cv2.CAP_FFMPEG, params)
     else:
         cap = cv2.VideoCapture(source_text if is_stream else str(video),cv2.CAP_FFMPEG)
+    connection_attempts = 1
+    while is_stream and not cap.isOpened() and connection_attempts <= retries:
+        cap.release()
+        cap = cv2.VideoCapture(source_text,cv2.CAP_FFMPEG,params) if hasattr(cv2,"CAP_PROP_OPEN_TIMEOUT_MSEC") and hasattr(cv2,"CAP_PROP_READ_TIMEOUT_MSEC") else cv2.VideoCapture(source_text,cv2.CAP_FFMPEG)
+        connection_attempts += 1
     if not cap.isOpened():
         cap.release()
         raise SystemExit("Could not open the video source. Check the file or camera connection settings.")
@@ -175,20 +192,28 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
                 speed.clear(expired_id)
                 speed_rule.clear(expired_id)
                 locations.pop(expired_id, None)
+                helmet_review.clear(expired_id)
             detections = detector.detect(frame)
             tracks = observed_tracks(tracker, detections, frame)
             helmet_by_track = {}
             if helmet_model:
-                person_boxes = []
-                for candidate in tracks:
-                    if candidate.object_class == "pedestrian":
-                        person_boxes.append((candidate.track_id, candidate.bbox_xyxy))
-                if person_boxes:
-                    helmet_by_track = helmet_model.associate(person_boxes, helmet_model.detect(frame))
+                people = [(t.track_id,t.bbox_xyxy) for t in tracks if t.object_class == "pedestrian"]
+                motorcycles = [(t.track_id,t.bbox_xyxy) for t in tracks if t.object_class == "motorcycle"]
+                if people and motorcycles:
+                    helmet_by_track = helmet_model.associate_riders(people,motorcycles,helmet_model.detect(frame))
+            for missing_id in set(helmet_review.history)-set(helmet_by_track):
+                helmet_review.clear(missing_id)
             active = []
             for track in tracks:
                 tid, box, vehicle_class = track.track_id, track.bbox_xyxy, track.object_class
-                helmet_class = helmet_by_track.get(tid) if vehicle_class == "pedestrian" else None
+                helmet_assessment = helmet_by_track.get(tid)
+                helmet_class = helmet_assessment.class_name if helmet_assessment else None
+                helmet_event = helmet_review.update(tid,helmet_assessment,now,frame_index)
+                if helmet_event:
+                    helmet_event.update(camera_id=cal.get("camera_id","unspecified"),source=event_source)
+                    helmet_event["event_id"] = write_event(events_path,helmet_event)
+                    if event_callback:
+                        event_callback(helmet_event)
                 track_confidence = track.confidence
                 position = None
                 estimate = None
@@ -264,7 +289,7 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
             for i, first in enumerate(measurable):
                 for second in measurable[i + 1:]:
                     enc = analyse_pair(first["id"], second["id"], first["position"], first["velocity"],
-                                       second["position"], second["velocity"])
+                                       second["position"], second["velocity"], **risk_options)
                     if enc.risk not in ("high", "elevated"):
                         continue
                     pair = tuple(sorted((enc.track_a, enc.track_b)))
@@ -277,7 +302,7 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
                         "camera_id": cal.get("camera_id", "unspecified"), "frame": frame_index,
                         "timestamp_s": round(now, 3), "encounter": asdict(enc),
                         "tracks": [first, second], "risk": score_event(None, False, None, True),
-                        "review_required": True
+                        "review_required": True, "screening_thresholds": risk_options
                     }
                     eid = write_event(events_path, event_payload)
                     event_payload["event_id"] = eid
@@ -302,6 +327,8 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
     elapsed = time.monotonic() - stream_started
     result = {"frames_processed": frame_index, "source_ended": stream_ended,
             "stopped": bool(stop_event and stop_event.is_set()),
+            "camera_connection_attempts": connection_attempts if is_stream else None,
+            "camera_reconnect_policy": "Bounded initial retries; interrupted streams require a new session to preserve track/time provenance." if is_stream else None,
             "calibration_status": "calibrated" if plane is not None else "unavailable",
             "calibration_message": calibration_error, "tracks": registry.summary(),
             "timestamp_source": mode, "output_frames": recording.next_index,
@@ -320,6 +347,10 @@ def run_video(video: Path | str, calibration: Path | None, model_path: str, out_
                            "class_map": detector.class_map,
                            "source_fps": fps, "image_size_px": [width, height],
                            "speed_rule": asdict(configured_rule),
+                           "screening_thresholds": risk_options,
+                           "helmet_model_sha256": _sha256(Path(helmet_weights)) if helmet_weights else None,
+                           "helmet_taxonomy": list(HELMET_CLASSES) if helmet_weights else None,
+                           "helmet_review_rule": {"duration_s":helmet_review.duration_s,"min_observations":helmet_review.min_observations,"max_gap_s":helmet_review.max_gap_s},
                            "versions": {name: importlib.metadata.version(name) for name in
                                         ("numpy", "opencv-python", "ultralytics", "deep-sort-realtime", "torch", "torchvision")}}}
     manifest_path.write_text(json.dumps(result, indent=2, allow_nan=False), encoding="utf-8")

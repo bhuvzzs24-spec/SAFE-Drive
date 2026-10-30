@@ -4,6 +4,7 @@ from safe_drive.helmet import HELMET_CLASSES, HelmetDetection, HelmetInference
 
 
 class FakeModel:
+    task = "detect"
     names = {index: name for index, name in enumerate(HELMET_CLASSES)}
 
 

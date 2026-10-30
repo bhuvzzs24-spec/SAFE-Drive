@@ -21,9 +21,11 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
 from safe_drive.camera_input import CameraConfigurationError, load_camera_source
+from safe_drive.vision import local_detector_weights
+from safe_drive.runtime_status import model_status
 from safe_drive.rules import SpeedLimitRule
 from safe_drive.storage import SQLiteStore
-from safe_drive.job_runner import supervise_job
+from safe_drive.job_runner import supervise_job, JobFailure
 from safe_drive.security import (RateGate, confined_file, deployment_settings,
                                  registered_camera_url, validate_video_header)
 
@@ -180,7 +182,9 @@ def create_app(test_config=None) -> Flask:
                                can_camera=g.role == "admin" and app.config["DEMO_CAMERAS"],
                                can_review=g.role in {"admin","reviewer"},
                                camera_status=camera_status, camera_id=camera_id,
-                               database_label=STORE.path.name if g.role != "public" else "Private storage",
+                               database_label=str(STORE.path.resolve()) if g.role != "public" else "Private storage",
+                               vehicle_runtime=model_status(os.environ.get("SAFE_DRIVE_MODEL","yolov8n.pt"),("ultralytics","cv2","deep_sort_realtime"),g.role!="public"),
+                               helmet_runtime=model_status(os.environ.get("SAFE_DRIVE_HELMET_MODEL",""),("ultralytics","torch"),g.role!="public"),
                                helmet_model_available=Path(os.environ.get("SAFE_DRIVE_HELMET_MODEL", "")).expanduser().is_file())
 
     def job_or_404(job_id: str) -> dict:
@@ -207,6 +211,15 @@ def create_app(test_config=None) -> Flask:
             with JOBS_LOCK:
                 JOBS[job_id].update(status="running",output=str(output_video),events=str(events_path))
             STORE.update_session(job_id,"running")
+            try:
+                local_detector_weights(model)
+            except (ValueError,OSError):
+                raise JobFailure("detector_weights_unavailable") from None
+            if os.environ.get("SAFE_DRIVE_HELMET_MODEL"):
+                try:
+                    local_detector_weights(os.environ["SAFE_DRIVE_HELMET_MODEL"])
+                except (ValueError,OSError):
+                    raise JobFailure("helmet_weights_unavailable") from None
             result = supervise_job(job_id,source,calibration_path,model,folder,STORE.path,stop_event,
                                    duration_s,source_label,speed_rule,app.config["DEMO_MAX_JOB_SECONDS"],
                                    lambda frames,elapsed,tracks:update_progress(job_id,frames,elapsed,tracks))
@@ -228,7 +241,7 @@ def create_app(test_config=None) -> Flask:
                 message = "Camera analysis failed. Check the RTSP address, network, credentials, and stream codec."
             else:
                 app.logger.warning("Analysis failed job=%s category=%s",job_id,type(exc).__name__)
-                message = "Analysis failed or exceeded its processing deadline. Check the video, configured weights and calibration."
+                message = str(exc) if isinstance(exc,JobFailure) else "Analysis failed or exceeded its processing deadline. Check the video, configured weights and calibration."
             with JOBS_LOCK:
                 JOBS[job_id].update(status="failed", error=message)
             try:
@@ -379,7 +392,7 @@ def create_app(test_config=None) -> Flask:
         except (CameraConfigurationError,ValueError):
             return jsonify(error="The server camera is not authorized or configured correctly."),400
         if configured_source.mode != "rtsp" or not configured_source.source:
-            return jsonify(error="No RTSP camera is configured. Enter a stream URL or configure SAFE_DRIVE_CAMERA_URL."), 400
+            return jsonify(error="No RTSP camera is configured. Configure an authorized server-side source."), 400
         if len(str(configured_source.source)) > 2048:
             return jsonify(error="Camera stream URL is too long."), 400
         stream_url = str(configured_source.source)
@@ -409,8 +422,10 @@ def create_app(test_config=None) -> Flask:
                 calibration = json.loads(calibration_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 pass
+        if calibration_path and calibration.get("camera_id") != configured_source.camera_id:
+            return jsonify(error="Calibration camera_id must match the registered camera ID."),400
         stop_event = threading.Event()
-        camera_label = str(calibration.get("camera_id") or configured_source.camera_id)[:80]
+        camera_label = str(configured_source.camera_id)[:80]
         STORE.create_session(job_id, camera_label, "rtsp", camera_label, model, calibration_status)
         with JOBS_LOCK:
             JOBS[job_id] = {"id": job_id, "name": camera_label, "status": "queued", "model": model,
@@ -471,7 +486,11 @@ def create_app(test_config=None) -> Flask:
 
     @app.get("/api/analytics")
     def get_analytics():
-        return jsonify(STORE.analytics() if g.role != "public" else public_empty_analytics())
+        selected = request.args.get("session_id", "")
+        if selected:
+            if g.role == "public": abort(401)
+            session_or_404(selected)
+        return jsonify(STORE.analytics(selected or None) if g.role != "public" else public_empty_analytics())
 
     def session_or_404(session_id: str) -> dict:
         if not JOB_ID.fullmatch(session_id):

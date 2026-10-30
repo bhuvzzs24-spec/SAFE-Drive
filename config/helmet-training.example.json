@@ -1,0 +1,16 @@
+{
+  "task": "detect",
+  "taxonomy": [
+    "full_face_helmet",
+    "half_face_helmet",
+    "no_helmet"
+  ],
+  "epochs": 100,
+  "imgsz": 960,
+  "batch": 8,
+  "device": "cpu",
+  "seed": 42,
+  "deterministic": true,
+  "workers": 0,
+  "note": "Documented CLI defaults; pass overrides explicitly. No dataset or checkpoint is bundled."
+}

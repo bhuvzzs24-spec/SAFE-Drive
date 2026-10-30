@@ -23,3 +23,7 @@ class EncounterTests(unittest.TestCase):
                 analyse_pair("a","b",vector,[0,0],[1,0],[0,0])
         with self.assertRaises(ValueError):
             analyse_pair("a","b",[0,0],[0,0],[1,0],[0,0],horizon_s=-1)
+
+    def test_missing_or_same_track_cannot_form_an_encounter(self):
+        for a,b in [('same','same'),('', 'b'),(None,'b')]:
+            with self.assertRaises(ValueError):analyse_pair(a,b,[0,0],[1,0],[2,0],[-1,0])

@@ -30,12 +30,13 @@
     return `${minutes}:${(rounded % 60).toFixed(2).padStart(5, '0')}`;
   }
   function trackIds(event) {
-    return [...new Set([event.track_id, event.encounter?.track_a, event.encounter?.track_b,
+    return [...new Set([event.track_id, event.motorcycle_track_id, event.encounter?.track_a, event.encounter?.track_b,
       ...(event.tracks || []).map(track => track.id ?? track.track_id)]
       .filter(value => value != null).map(String))];
   }
   function severity(event) {
     if (event.event_type === 'speed_limit_exceeded') return 'speed';
+    if (event.event_type === 'helmet_review') return 'helmet';
     const value = event.encounter?.risk || event.risk?.level;
     return ['high', 'elevated', 'moderate', 'low'].includes(value) ? value : 'unknown';
   }
@@ -44,11 +45,12 @@
     return events.filter(event => {
       const isSpeed = event.event_type === 'speed_limit_exceeded';
       if (options.type === 'speed_limit_exceeded' && !isSpeed) return false;
+      if (options.type === 'helmet_review' && event.event_type !== 'helmet_review') return false;
       if (options.type === 'risk' && event.event_type !== 'approach_risk_screen') return false;
       if (options.status && options.status !== 'all' && (event.review_status || 'pending') !== options.status) return false;
       if (options.severity && options.severity !== 'all' && severity(event) !== options.severity) return false;
       const text = [event.event_type, event.event_id, event.description, severity(event),
-        event.reviewer, ...trackIds(event)].filter(Boolean).join(' ').toLowerCase();
+        event.helmet_class, event.reviewer, ...trackIds(event)].filter(Boolean).join(' ').toLowerCase();
       return !query || text.includes(query);
     }).sort((a, b) => (number(b.timestamp_s) ?? -1) - (number(a.timestamp_s) ?? -1));
   }
@@ -83,6 +85,7 @@
     const text = String(message || '');
     if (/analysis failed or exceeded|processing deadline/i.test(text)) return 'Analysis did not complete. The input, server configuration or processing deadline needs operator review.';
     if (/optional dependencies|no module named|requires.*dependencies/i.test(text)) return 'Video dependencies are unavailable. Install the project vision extra in the application environment.';
+    if (/helmet.*weights/i.test(text)) return 'The helmet detector could not load compatible three-class weights. Check the configured model or disable optional helmet inference.';
     if (/weights|model.*(not found|exist)|filenotfound/i.test(text)) return 'The detector could not load its weights. Check the configured local model file and compatible classes.';
     if (/camera|rtsp|stream/i.test(text)) return 'Camera analysis failed. Check the configured source, access, and codec.';
     if (/video|frame|source.*(end|open)/i.test(text)) return 'The video could not be processed. Check that the clip is readable and has a supported codec and valid frame rate.';
@@ -114,6 +117,12 @@
     let generation = 0;
     return {next: () => ++generation, current: token => token === generation};
   }
-  return {number, count, measurement, trackSpeed, timestamp, trackIds, severity, filterEvents,
+  const pages = Object.freeze({home:'SAFE-Drive',overview:'Overview',analysis:'Video Analysis',tracking:'Vehicle Tracking',
+    helmets:'Helmet Compliance',speed:'Speed Violations',events:'Event Review',analytics:'Analytics',cameras:'Camera Management',settings:'Settings'});
+  function pageForHash(hash) {
+    const value = String(hash ?? '').replace(/^#/, '');
+    return Object.prototype.hasOwnProperty.call(pages, value) ? value : 'home';
+  }
+  return {pages, pageForHash, number, count, measurement, trackSpeed, timestamp, trackIds, severity, filterEvents,
     calibrationState, validateCalibration, jobFailure, requestJSON, createSelectionScope};
 });

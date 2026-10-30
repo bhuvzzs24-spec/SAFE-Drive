@@ -85,5 +85,46 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(events[0]["reviewer"], "Test reviewer")
 
 
+    def test_selected_session_analytics_and_model_readiness_are_honest(self):
+        store=self.dashboard.STORE
+        for key,frames in [('a'*32,12),('b'*32,35)]:
+            store.create_session(key,'synthetic','uploaded_video','fixture','missing.pt','missing')
+            store.update_session(key,'completed',frames)
+        one=self.client.get('/api/analytics?session_id='+'a'*32)
+        self.assertEqual(one.status_code,200);self.assertEqual(one.get_json()['sessions'],1)
+        self.assertEqual(one.get_json()['frames_processed'],12)
+        self.assertEqual(self.client.get('/api/analytics').get_json()['frames_processed'],47)
+        self.assertEqual(self.client.get('/api/analytics?session_id=../bad').status_code,404)
+        text=self.client.get('/').get_data(as_text=True)
+        self.assertIn(str(store.path.resolve()),text)
+        self.assertIn('Model loaded',text);self.assertIn('Not verified',text)
+
+    def test_actual_missing_weight_failure_is_saved_and_recovered_without_inference(self):
+        import io,time
+        response=self.client.post('/api/jobs',data={'video':(io.BytesIO(b'\0\0\0\x18ftypisom'),'HEADER-ONLY-synthetic.mp4'),
+            'model':str(Path(self.temp_dir.name)/'absent.pt')},headers={'X-CSRF-Token':self.csrf})
+        self.assertEqual(response.status_code,202);job=response.get_json()['id']
+        for _ in range(100):
+            state=self.client.get('/api/jobs/'+job).get_json()
+            if state['status']=='failed':break
+            time.sleep(.01)
+        self.assertEqual(state['status'],'failed');self.assertIn('weights',state['error'])
+        self.assertNotIn(self.temp_dir.name,state['error'])
+        reopened=self.dashboard.SQLiteStore(self.dashboard.STORE.path)
+        self.assertEqual(reopened.get_session(job)['status'],'failed')
+        self.assertEqual(reopened.list_tracks(job),[])
+
+    def test_private_camera_rejects_calibration_from_another_camera(self):
+        import io,json,os
+        from unittest.mock import patch
+        from safe_drive.camera_input import CameraSource
+        app=self.dashboard.create_app({'DEMO_CAMERAS':True});client=app.test_client()
+        csrf=re.search(rb'name="csrf-token" content="([^"]+)"',client.get('/').data).group(1).decode()
+        geometry={'camera_id':'different','image_points_px':[[0,0],[100,0],[100,100],[0,100]],'road_points_m':[[0,0],[10,0],[10,10],[0,10]]}
+        with patch.object(self.dashboard,'load_camera_source',return_value=CameraSource('rtsp','registered','rtsp://10.0.0.2/stream')),patch.dict(os.environ,{'SAFE_DRIVE_CAMERA_ALLOWED_IPS':'10.0.0.2'}):
+            response=client.post('/api/camera-jobs',data={'calibration':(io.BytesIO(json.dumps(geometry).encode()),'calibration.json')},headers={'X-CSRF-Token':csrf})
+        self.assertEqual(response.status_code,400);self.assertIn('camera_id',response.get_json()['error'])
+
+
 if __name__ == "__main__":
     unittest.main()

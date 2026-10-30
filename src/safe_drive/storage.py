@@ -307,23 +307,25 @@ class SQLiteStore:
             tracks.append(track)
         return tracks
 
-    def analytics(self) -> dict:
-        """Return aggregate counts and dated session activity from persisted rows."""
+    def analytics(self, session_id: str | None = None) -> dict:
+        """Return aggregate or selected-session counts from persisted rows."""
+        where = " WHERE session_id=?" if session_id else ""
+        values = (session_id,) if session_id else ()
         with self._connect() as conn:
             session = conn.execute("""SELECT COUNT(*) AS sessions,
                 COALESCE(SUM(status='completed'),0) AS completed,
                 COALESCE(SUM(frames_processed),0) AS frames
-                FROM analysis_sessions""").fetchone()
+                FROM analysis_sessions""" + where, values).fetchone()
             tracks = conn.execute("""SELECT COUNT(*) AS tracks,
-                COALESCE(SUM(speed_kmh IS NOT NULL),0) AS valid_speed
-                FROM vehicle_tracks""").fetchone()
-            pedestrians = conn.execute("SELECT COUNT(*) FROM tracked_objects WHERE object_class='pedestrian'").fetchone()[0]
+                COALESCE(SUM(speed_kmh IS NOT NULL AND speed_kmh>=0 AND speed_quality='calibrated_estimate'),0) AS valid_speed
+                FROM vehicle_tracks""" + where, values).fetchone()
+            pedestrians = conn.execute("SELECT COUNT(*) FROM tracked_objects WHERE object_class='pedestrian'" + (" AND session_id=?" if session_id else ""), values).fetchone()[0]
             events = conn.execute("""SELECT COUNT(*) AS events,
                 COALESCE(SUM(review_status='pending'),0) AS pending,
                 COALESCE(SUM(review_status IN ('verified','rejected')),0) AS reviewed
-                FROM violation_events""").fetchone()
+                FROM violation_events""" + where, values).fetchone()
             activity = conn.execute("""SELECT substr(started_at,1,10) AS day, COUNT(*) AS sessions
-                FROM analysis_sessions GROUP BY day ORDER BY day DESC LIMIT 7""").fetchall()
+                FROM analysis_sessions""" + where + " GROUP BY day ORDER BY day DESC LIMIT 7", values).fetchall()
         return {"sessions": int(session["sessions"]), "completed_sessions": int(session["completed"]),
                 "frames_processed": int(session["frames"]), "vehicle_tracks": int(tracks["tracks"]),
                 "tracks_with_valid_speed": int(tracks["valid_speed"]),

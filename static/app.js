@@ -9,8 +9,7 @@ const canReview = document.querySelector('meta[name="can-review"]').content === 
 const publicViewer = document.querySelector('meta[name="user-role"]').content === 'public';
 const defaultStatus = $('system-state').textContent;
 const scope = UI.createSelectionScope();
-const pages = {overview:'Overview', analysis:'Video Analysis', tracking:'Vehicle Tracking', helmets:'Helmet Compliance',
-  speed:'Speed Violations', events:'Event Review', analytics:'Analytics', cameras:'Camera Management', settings:'Settings'};
+const pages = UI.pages;
 let currentSession = null, tracks = [], events = [], sessions = [];
 let historyState = 'loading', trackState = 'none', eventState = 'none', evidenceState = 'unavailable';
 let selectedTrack = null, selectedEvent = null, eventsUrl = null, pollTimer = null, reader = null;
@@ -64,22 +63,33 @@ document.addEventListener('keydown', event => {
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
 });
 function navigatePage(page, updateHash = true, focus = false) {
-  if (!pages[page]) page = 'overview';
+  page = UI.pageForHash(page);
+  const product = page === 'home';
+  $('workspace-shell').hidden = product;
+  document.body.classList.toggle('is-product',product);
+  $('workspace-skip').href = product ? '#product-content' : '#main-content';
+  $('workspace-skip').textContent = product ? 'Skip to content' : 'Skip to workspace';
   document.querySelectorAll('.page-view').forEach(view => { view.hidden = view.dataset.page !== page; });
   document.querySelectorAll('[data-page-link]').forEach(item => {
     const active = item.dataset.pageLink === page; item.classList.toggle('active',active);
     if (active && item.classList.contains('nav-item')) item.setAttribute('aria-current','page'); else item.removeAttribute('aria-current');
   });
-  $('current-page-title').textContent = pages[page]; document.title = `${pages[page]} | SAFE-Drive`;
-  if (updateHash && location.hash !== `#${page}`) history.replaceState(null,'',`#${page}`);
+  $('current-page-title').textContent = pages[page]; document.title = product ? 'SAFE-Drive | A clearer perspective on road safety' : `${pages[page]} | SAFE-Drive`;
+  if (updateHash && location.hash !== `#${page}`) history.pushState(null,'',`#${page}`);
   closeNav();
   if (focus) { const heading = document.querySelector(`#page-${page} h1`); heading.tabIndex = -1; heading.focus({preventScroll:true}); window.scrollTo({top:0,behavior:'auto'}); }
+  document.dispatchEvent(new CustomEvent('safe-drive:navigate',{detail:{page}}));
 }
 document.querySelectorAll('[data-page-link],[data-open-page]').forEach(item => item.addEventListener('click', event => {
   event.preventDefault(); navigatePage(item.dataset.pageLink || item.dataset.openPage,true,true);
 }));
-window.addEventListener('hashchange', () => navigatePage(location.hash.slice(1),false));
-navigatePage(location.hash.slice(1) || 'overview',false);
+function openLocation() {
+  const hash = location.hash.slice(1);
+  navigatePage(hash,false);
+  if (hash.startsWith('story-')) document.getElementById(hash)?.scrollIntoView({behavior:'auto',block:'start'});
+}
+window.addEventListener('hashchange',openLocation);
+openLocation();
 
 function restoreAnnotatedVideo() {
   $('video-comparison').prepend(document.querySelector('.annotated-wrap'));
@@ -152,7 +162,7 @@ $('calibration-file').addEventListener('change',async () => {
   if (!file) { calibrationCheck = 'missing'; calibrationMessage('No calibration. Speed will be unavailable.','pending'); return; }
   calibrationCheck = 'checking'; calibrationMessage('Checking the calibration file…','pending');
   try {
-    if (file.size > 1024*1024) throw new Error('Use a calibration JSON file smaller than 1 MB.');
+    if (file.size > 64*1024) throw new Error('Use a calibration JSON file of 64 KiB or less.');
     const checked = UI.validateCalibration(JSON.parse(await file.text()));
     if (revision !== calibrationRevision) return;
     calibrationCheck = 'checked'; calibrationMessage(checked.message,'valid');
@@ -170,7 +180,7 @@ $('calibration-template').addEventListener('click', () => {
   const url = URL.createObjectURL(new Blob([JSON.stringify(template,null,2)],{type:'application/json'}));
   const link = el('a'); link.href = url; link.download = 'camera-calibration-template.json'; link.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
 });
-$('analysis-form').addEventListener('invalid',event => { $('form-error').textContent = event.target.validationMessage || 'Check the required analysis inputs.'; },true);
+$('analysis-form').addEventListener('invalid',event => { const section=event.target.closest('details'); if(section)section.open=true; $('form-error').textContent = event.target.validationMessage || 'Check the required analysis inputs.'; },true);
 $('analysis-form').addEventListener('submit',async event => {
   if (!(activeMode === 'camera' ? canCamera : canUpload)) { event.preventDefault(); notice('This account cannot start analysis. Public samples are read-only.'); return; }
   event.preventDefault();
@@ -207,6 +217,7 @@ function updateContext() {
   $('session-calibration-status').title = calibration.detail; $('system-state').textContent = `${human(session.status)} · ${source.toLowerCase()}`;
   $('header-mode').textContent = source; $('tracking-session-name').textContent = name;
   $('event-session-label').textContent = `${name} · ${session.session_id.slice(0,8)} · ${human(session.status)}`;
+  if($('analytics-scope').value==='selected')loadAnalyticsScope();
 }
 function showJob(id,live,inputName) {
   const token = activateSession({id,source_mode:live?'rtsp':'uploaded_video',status:'queued',
@@ -297,7 +308,7 @@ function renderTracks() {
   for (const [id,value] of [['result-object-count',tracks.length],['result-vehicle-count',tracks.length-pedestrians],['result-pedestrian-count',pedestrians],['result-speed-count',valid]]) $(id).textContent = loaded?UI.count(value):'—';
   $('track-count').textContent = loaded?`${tracks.length} tracks · ${valid} with valid speed`:trackState === 'loading'?'Loading tracks…':'No track data loaded';
   $('result-track-summary').textContent = loaded?`${tracks.length} tracked objects · ${valid} available speeds`:'Select or process a session to inspect actual results.';
-  applyTrackFilter(); renderTrackDetail();
+  applyTrackFilter(); renderTrackDetail(); renderHelmets();
 }
 function applyTrackFilter() {
   const tbody = $('track-table'), query = $('track-filter').value.trim().toLowerCase();
@@ -325,11 +336,25 @@ function renderTrackDetail() {
   detail.append(related.length?links:el('p','data-caption','No saved events reference this track.'));
 }
 $('track-filter').addEventListener('input',applyTrackFilter);
+function renderHelmets() {
+  const list=$('helmet-track-list'),summary=$('helmet-session-summary');
+  if(trackState!=='loaded'){summary.textContent=trackState==='loading'?'Loading saved observations…':'Choose a session. No classifications are assumed.';tableEmpty(list,4,'No helmet observations loaded.');return;}
+  const observed=tracks.filter(track=>track.helmet_class!=null);
+  summary.textContent=`${observed.length} tracks with a saved latest helmet observation. These are predictions or abstentions, not compliance counts.`;
+  if(!observed.length){tableEmpty(list,4,'No helmet observations saved. Compatible weights and visible, uniquely associated rider heads are required.');return;}
+  list.replaceChildren();
+  observed.forEach(track=>{
+    const related=events.filter(event=>event.event_type==='helmet_review' && String(event.track_id)===String(track.track_id));
+    const row=el('tr');[track.track_id,human(track.helmet_class),related.length,related.length?related.map(event=>human(event.review_status || 'pending')).join(', '):'No temporally confirmed review event'].forEach(value=>row.append(el('td','',String(value))));list.append(row);
+  });
+}
 
-function eventLabel(event) {return event.event_type==='speed_limit_exceeded'?'Speed-rule event':event.event_type==='approach_risk_screen'?'Approach-risk signal':human(event.event_type || 'Saved event');}
-function severityLabel(event) {const value=UI.severity(event);return value==='speed'?'Configured rule':value==='unknown'?'Unrated signal':`${value} risk · experimental`;}
+
+function eventLabel(event) {return event.event_type==='speed_limit_exceeded'?'Speed-rule event':event.event_type==='approach_risk_screen'?'Approach-risk signal':event.event_type==='helmet_review'?'Helmet review':human(event.event_type || 'Saved event');}
+function severityLabel(event) {const value=UI.severity(event);return value==='speed'?'Configured rule':value==='helmet'?'Helmet review · experimental':value==='unknown'?'Unrated signal':`${value} risk · experimental`;}
 function eventDescription(event) {
   if (event.event_type==='speed_limit_exceeded') return `Track ${event.track_id ?? '—'} · ${UI.measurement(event.speed_kmh,' km/h')} · limit ${UI.measurement(event.speed_limit_kmh,' km/h',0)} · tolerance ${UI.measurement(event.tolerance_kmh,' km/h',0)}`;
+  if (event.event_type==='helmet_review') return `Person ${event.track_id} · motorcycle ${event.motorcycle_track_id} · ${human(event.helmet_class)} · experimental, review required`;
   const encounter=event.encounter || {};
   if (encounter.track_a!=null) return `Tracks ${UI.trackIds(event).join(' / ')} · TTC ${UI.measurement(encounter.ttc_s,' s')} · closest approach ${UI.measurement(encounter.closest_distance_m,' m')}`;
   return event.description || 'Saved screening signal. Inspect the measurements and recording before review.';
@@ -345,7 +370,7 @@ function eventCard(event) {
 }
 function renderEvents() {
   $('pending-nav-state').textContent=eventState==='loaded'?`${events.filter(event=>(event.review_status || 'pending')==='pending').length} pending`:'—';
-  applyEventFilters();renderEventDetail();renderSpeedEvents();renderTimeline();renderTrackDetail();
+  applyEventFilters();renderEventDetail();renderSpeedEvents();renderTimeline();renderTrackDetail();renderHelmets();
 }
 function applyEventFilters() {
   const list=$('event-list');
@@ -444,9 +469,10 @@ async function loadSessions() {
   renderSessionPicker();renderHistory();$('refresh-history').disabled=false;$('history-list').setAttribute('aria-busy','false');
   if(errors.length)notice(errors.join(' '),loadSessions);else if(!retryAction || retryAction===loadSessions)clearNotice();
 }
-function updateAnalytics(data) {
+function updateAnalytics(data, filtered=false) {
   const mappings={'overview-session-count':'sessions','overview-track-count':'vehicle_tracks','overview-pedestrian-count':'pedestrians','overview-pending-count':'pending_events','overview-calibrated-count':'tracks_with_valid_speed','analytics-sessions':'sessions','analytics-frames':'frames_processed','analytics-tracks':'vehicle_tracks','analytics-reviewed':'reviewed_events'};
-  Object.entries(mappings).forEach(([id,key])=>{$(id).textContent=UI.count(data?.[key]);});
+  Object.entries(mappings).forEach(([id,key])=>{if(!filtered || id.startsWith('analytics-'))$(id).textContent=UI.count(data?.[key]);});
+  if(!filtered && $('analytics-scope').value==='selected'){loadAnalyticsScope();return;}
   const chart=$('analytics-chart');if(!data){empty(chart,'Analytics unavailable','Retry the workspace request. Missing data is not represented as zero.');return;}
   if(!data.activity?.length){empty(chart,'No session activity yet','The chart uses saved session counts by day.');return;}
   const bars=el('div','chart-bars'),max=Math.max(...data.activity.map(day=>Number(day.sessions)),1);
@@ -490,3 +516,14 @@ if(publicViewer){
 }
 runButton(false);
 renderTracks();renderEvents();loadSessions();
+
+let analyticsRequest=0;
+async function loadAnalyticsScope(){
+  const token=++analyticsRequest, selected=$('analytics-scope').value==='selected',id=currentSession?.session_id;
+  if(selected && !id){updateAnalytics(null,true);return;}
+  try{
+    const data=await UI.requestJSON('/api/analytics'+(selected?'?session_id='+encodeURIComponent(id):''));
+    if(token===analyticsRequest && (!selected || currentSession?.session_id===id))updateAnalytics(data,true);
+  }catch(error){if(token===analyticsRequest){updateAnalytics(null,true);$('analytics-chart').textContent=error.message;}}
+}
+$('analytics-scope').addEventListener('change',loadAnalyticsScope);

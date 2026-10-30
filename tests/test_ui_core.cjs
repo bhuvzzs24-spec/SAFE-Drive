@@ -2,6 +2,18 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const UI = require('../static/ui-core.js');
 
+test('product and workspace routes resolve safely without losing legacy deep links', () => {
+  assert.equal(UI.pageForHash(''), 'home');
+  assert.equal(UI.pageForHash('#home'), 'home');
+  assert.equal(UI.pageForHash('#story-calibration'), 'home');
+  assert.equal(UI.pageForHash('__proto__'), 'home');
+  assert.equal(UI.pageForHash('constructor'), 'home');
+  assert.equal(UI.pageForHash('unknown'), 'home');
+  for (const page of ['overview','analysis','tracking','helmets','speed','events','analytics','cameras','settings']) {
+    assert.equal(UI.pageForHash(`#${page}`), page);
+  }
+});
+
 test('missing measurements never become zero while real zero stays visible', () => {
   for (const value of [null, undefined, '', '  ', false, [], {}, NaN, Infinity]) {
     assert.equal(UI.number(value), null);
@@ -81,4 +93,12 @@ test('job failures explain missing assets without exposing private paths', () =>
   assert.match(message, /weights/);
   assert.doesNotMatch(message, /Users/);
   assert.match(UI.jobFailure('ImportError: Video mode needs optional dependencies'), /vision extra/);
+});
+
+test('helmet review filters preserve rider and motorcycle references without treating review as risk', () => {
+  const saved=[{event_id:'helmet-1',event_type:'helmet_review',track_id:'rider-1',motorcycle_track_id:'bike-2',helmet_class:'half_face_helmet',review_status:'pending',timestamp_s:1},...fixture];
+  assert.equal(UI.filterEvents(saved,{type:'helmet_review',query:'bike-2'}).length,1);
+  assert.equal(UI.filterEvents(saved,{type:'helmet_review',query:'half_face_helmet'}).length,1);
+  assert.equal(UI.filterEvents(saved,{type:'risk'}).some(e=>e.event_type==='helmet_review'),false);
+  assert.match(UI.jobFailure('Helmet weights are missing'),/helmet detector/);
 });

@@ -195,6 +195,57 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(output.read_bytes(),b"keep")
         self.cv2.VideoCapture.assert_not_called()
 
+    def test_synthetic_rider_helmet_temporal_event_reaches_sqlite_and_frame_log(self):
+        # Head detections and road-user boxes are supplied fixtures, NOT inference.
+        from safe_drive.helmet import HelmetInference,HelmetDetection,HELMET_CLASSES
+        self.model.names={0:'car',1:'person',2:'motorcycle'}
+        def detections(frame,**kwargs):
+            boxes=[]
+            for cls,coords in [(0,[200,50,225,100]),(1,[20,10,80,130]),(2,[0,90,110,170])]:
+                tensor=Mock();tensor.cpu.return_value.numpy.return_value=np.array(coords)
+                boxes.append(SimpleNamespace(cls=[cls],conf=[.9],xyxy=[tensor]))
+            return [SimpleNamespace(orig_shape=(200,320),boxes=boxes)]
+        self.model.side_effect=detections
+        def tracking(detections,frame):
+            result=[]
+            for box,confidence,label in detections:
+                x,y,w,h=box
+                track=Mock(track_id={'car':'car-1','pedestrian':'rider-2','motorcycle':'bike-3'}[label],time_since_update=0)
+                track.is_confirmed.return_value=True;track.to_ltrb.return_value=[x,y,x+w,y+h]
+                track.get_det_class.return_value=label;track.get_det_conf.return_value=confidence;result.append(track)
+            return result
+        self.tracker.update_tracks.side_effect=tracking
+        adapter=HelmetInference(SimpleNamespace(task='detect',names=list(HELMET_CLASSES)))
+        adapter.detect=Mock(return_value=[HelmetDetection((38,15,62,35),'half_face_helmet',.9)])
+        helmet_weights=self.root/'STUB-head-model.pt';helmet_weights.write_bytes(b'NOT REAL WEIGHTS')
+        with patch.dict('sys.modules',self.modules),patch.dict('os.environ',{'SAFE_DRIVE_HELMET_MODEL':str(helmet_weights),'SAFE_DRIVE_TIMESTAMP_MODE':'pts'}),patch.object(HelmetInference,'from_path',return_value=adapter):
+            import os
+            os.environ.pop('SAFE_DRIVE_TRACKER_WEIGHTS',None)
+            result=run_video(self.input,None,str(self.weights),self.root/'annotated.mp4',self.root/'events.jsonl',.35,
+                             event_callback=lambda event:self.store.insert_event('test',event))
+        events=self.store.list_events('test')
+        self.assertEqual(len(events),1);event=events[0]
+        self.assertEqual((event['event_type'],event['track_id'],event['motorcycle_track_id']),('helmet_review','rider-2','bike-3'))
+        self.assertEqual((event['frame'],event['timestamp_s'],event['review_status']),(10,1.,'pending'))
+        self.assertEqual(result['provenance']['helmet_taxonomy'],list(HELMET_CLASSES))
+        reopened=SQLiteStore(self.store.path);self.assertEqual(reopened.list_events('test')[0]['helmet_class'],'half_face_helmet')
+        rows=[json.loads(line) for line in (self.root/'annotated.tracks.jsonl').read_text().splitlines()]
+        self.assertEqual(rows[-1]['tracks'][1]['helmet_class'],'half_face_helmet')
+
+
+
+    def test_synthetic_initial_camera_connection_retries_are_bounded(self):
+        closed=Mock();closed.isOpened.return_value=False
+        self.cv2.VideoCapture.side_effect=[closed,self.cap]
+        with patch.dict('sys.modules',self.modules),patch.dict('os.environ',{'SAFE_DRIVE_HELMET_MODEL':'','SAFE_DRIVE_CAMERA_CONNECT_RETRIES':'1'}):
+            import os
+            os.environ.pop('SAFE_DRIVE_TRACKER_WEIGHTS',None)
+            result=run_video('rtsp://10.0.0.2/SYNTHETIC-NO-NETWORK',None,str(self.weights),self.root/'annotated.mp4',self.root/'events.jsonl',.35)
+        self.assertEqual(result['camera_connection_attempts'],2)
+        self.assertEqual(self.cv2.VideoCapture.call_count,2)
+        self.assertIn('new session',result['camera_reconnect_policy'])
+        closed.release.assert_called_once();self.cap.release.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
